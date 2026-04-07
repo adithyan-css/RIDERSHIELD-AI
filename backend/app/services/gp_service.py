@@ -1,12 +1,15 @@
 import asyncio
-import json
 import logging
 from typing import Any
 
 from bson import ObjectId
 
 from app.core.config import settings
-from app.core.redis_client import get_redis
+from app.core.redis_client import (
+    dequeue_hfv_ids,
+    list_hfv_queue_geohashes,
+    store_gp_surface,
+)
 from app.db.mongo import get_mongo_db
 
 logger = logging.getLogger(__name__)
@@ -79,16 +82,13 @@ def _build_geojson_surface(hazard_docs: list[dict[str, Any]], grid_size: int) ->
 
 
 async def _pop_queue_entries() -> dict[str, list[str]]:
-    redis = get_redis()
     queue_data: dict[str, list[str]] = {}
 
-    async for key in redis.scan_iter(match="hfv_queue:*", count=100):
-        entries = await redis.lrange(key, 0, settings.GP_QUEUE_BATCH_SIZE - 1)
+    geohashes = await list_hfv_queue_geohashes()
+    for geohash in geohashes:
+        entries = await dequeue_hfv_ids(geohash, settings.GP_QUEUE_BATCH_SIZE)
         if not entries:
             continue
-
-        await redis.ltrim(key, len(entries), -1)
-        geohash = key.split(":", 1)[1]
         queue_data[geohash] = entries
 
     return queue_data
@@ -122,7 +122,6 @@ async def process_queued_hfvs() -> int:
     if not queue_data:
         return 0
 
-    redis = get_redis()
     surfaces_written = 0
 
     for geohash, hazard_ids in queue_data.items():
@@ -136,8 +135,7 @@ async def process_queued_hfvs() -> int:
             hazard_docs,
             settings.GP_GRID_SIZE,
         )
-        cache_key = f"gp_surface:{geohash}"
-        await redis.set(cache_key, json.dumps(geojson), ex=settings.REDIS_CACHE_TTL_S)
+        await store_gp_surface(geohash, geojson, settings.REDIS_CACHE_TTL_S)
         surfaces_written += 1
 
     if surfaces_written:

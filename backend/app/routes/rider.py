@@ -1,11 +1,10 @@
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.core.redis_client import get_redis
+from app.core.redis_client import cache_rider_location
 from app.core.websocket_manager import websocket_manager
 from app.db.mongo import get_mongo_db
 from app.models.rider import RiderAuthOut, RiderLocationIn, RiderLoginIn, RiderRegisterIn
@@ -16,9 +15,7 @@ router = APIRouter()
 
 
 async def _cache_rider_location(rider_id: str, lat: float, lng: float, ts: str) -> None:
-    redis = get_redis()
-    payload = {"lat": lat, "lng": lng, "timestamp": ts}
-    await redis.set(f"rider:location:{rider_id}", json.dumps(payload), ex=120)
+    await cache_rider_location(rider_id, lat, lng, ts, ttl_seconds=120)
 
 
 @router.post("/rider/register", response_model=RiderAuthOut)

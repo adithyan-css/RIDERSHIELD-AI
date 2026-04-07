@@ -66,6 +66,18 @@ class WebSocketManager:
                 sent += 1
         return sent
 
+    async def broadcast_to_multiple(
+        self,
+        rider_ids: list[str],
+        message: dict[str, Any],
+        exclude_rider_id: str | None = None,
+    ) -> int:
+        return await self.broadcast_to_riders(
+            rider_ids,
+            message,
+            exclude_rider_id=exclude_rider_id,
+        )
+
     async def is_connected(self, rider_id: str) -> bool:
         async with self._lock:
             return rider_id in self._riders

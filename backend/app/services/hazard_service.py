@@ -6,7 +6,7 @@ import pygeohash as pgh
 from pydantic import ValidationError
 
 from app.core.config import settings
-from app.core.redis_client import get_redis
+from app.core.redis_client import enqueue_hfv_id
 from app.db.mongo import get_mongo_db
 from app.models.hazard import HFVIn
 from app.services.proof_service import check_verification
@@ -44,13 +44,10 @@ async def process_hfv(payload: dict[str, Any], source: str = "api") -> dict[str,
         doc["accel_rms"] = float(hfv.accel_rms)
 
     db = get_mongo_db()
-    redis = get_redis()
-
     insert_result = await db.hazards.insert_one(doc)
     hazard_id = str(insert_result.inserted_id)
 
-    queue_key = f"hfv_queue:{geohash}"
-    await redis.rpush(queue_key, hazard_id)
+    await enqueue_hfv_id(geohash, hazard_id)
 
     logger.info(
         "HFV stored id=%s rider_id=%s geohash=%s source=%s",

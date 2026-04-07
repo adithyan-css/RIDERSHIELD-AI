@@ -1,4 +1,6 @@
 import logging
+import json
+from typing import Any
 
 from redis.asyncio import Redis
 
@@ -32,3 +34,65 @@ async def close_redis() -> None:
         await _redis_client.aclose()
         _redis_client = None
         logger.info("Redis connection closed")
+
+
+async def enqueue_hfv_id(geohash: str, hazard_id: str) -> str:
+    redis = get_redis()
+    key = f"hfv_queue:{geohash}"
+    await redis.rpush(key, hazard_id)
+    return key
+
+
+async def dequeue_hfv_ids(geohash: str, batch_size: int) -> list[str]:
+    redis = get_redis()
+    key = f"hfv_queue:{geohash}"
+    entries = await redis.lrange(key, 0, batch_size - 1)
+    if not entries:
+        return []
+    await redis.ltrim(key, len(entries), -1)
+    return entries
+
+
+async def list_hfv_queue_geohashes() -> list[str]:
+    redis = get_redis()
+    geohashes: list[str] = []
+    async for key in redis.scan_iter(match="hfv_queue:*", count=200):
+        geohashes.append(key.split(":", 1)[1])
+    return geohashes
+
+
+async def store_gp_surface(geohash: str, geojson: dict[str, Any], ttl_seconds: int | None = None) -> str:
+    redis = get_redis()
+    key = f"gp_surface:{geohash}"
+    await redis.set(
+        key,
+        json.dumps(geojson),
+        ex=ttl_seconds or settings.REDIS_CACHE_TTL_S,
+    )
+    return key
+
+
+async def cache_rider_location(rider_id: str, lat: float, lng: float, ts: str, ttl_seconds: int = 120) -> str:
+    redis = get_redis()
+    key = f"rider:location:{rider_id}"
+    payload = {"lat": lat, "lng": lng, "timestamp": ts}
+    await redis.set(key, json.dumps(payload), ex=ttl_seconds)
+    return key
+
+
+async def get_all_rider_locations() -> dict[str, dict[str, float]]:
+    redis = get_redis()
+    out: dict[str, dict[str, float]] = {}
+    async for key in redis.scan_iter(match="rider:location:*", count=500):
+        raw = await redis.get(key)
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+            out[key.split(":")[-1]] = {
+                "lat": float(data["lat"]),
+                "lng": float(data["lng"]),
+            }
+        except Exception:
+            continue
+    return out

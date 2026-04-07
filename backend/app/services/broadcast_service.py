@@ -1,10 +1,9 @@
-import json
 import logging
 import math
 from typing import Any
 
 from app.core.config import settings
-from app.core.redis_client import get_redis
+from app.core.redis_client import get_all_rider_locations
 from app.core.websocket_manager import websocket_manager
 
 logger = logging.getLogger(__name__)
@@ -26,23 +25,14 @@ def _distance_meters(lat1: float, lng1: float, lat2: float, lng2: float) -> floa
 
 
 async def _nearby_rider_ids(lat: float, lng: float, radius_m: int) -> list[str]:
-    redis = get_redis()
     nearby: list[str] = []
 
-    async for key in redis.scan_iter(match="rider:location:*", count=200):
-        raw = await redis.get(key)
-        if not raw:
-            continue
-
-        try:
-            data = json.loads(raw)
-            rider_lat = float(data["lat"])
-            rider_lng = float(data["lng"])
-        except Exception:
-            continue
-
+    rider_locations = await get_all_rider_locations()
+    for rider_id, data in rider_locations.items():
+        rider_lat = data["lat"]
+        rider_lng = data["lng"]
         if _distance_meters(lat, lng, rider_lat, rider_lng) <= radius_m:
-            nearby.append(key.split(":")[-1])
+            nearby.append(rider_id)
 
     return nearby
 
@@ -63,14 +53,14 @@ async def broadcast_hazard(hazard_doc: dict[str, Any]) -> int:
         "confidence": float(hazard_doc.get("proof_score") or hazard_doc.get("confidence") or 0.0),
     }
 
-    sent_count = await websocket_manager.broadcast_to_riders(
+    sent_count = await websocket_manager.broadcast_to_multiple(
         rider_ids,
         payload,
         exclude_rider_id=hazard_doc.get("rider_id"),
     )
 
     logger.info(
-        "Hazard alert broadcast type=%s near=%s sent=%s",
+        "Peer alert broadcast type=%s near=%s sent=%s",
         payload["hazard_type"],
         len(rider_ids),
         sent_count,
