@@ -47,7 +47,7 @@ async def _nearby_rider_ids(lat: float, lng: float, radius_m: int) -> list[str]:
     return nearby
 
 
-async def broadcast_hazard_alert(hazard_doc: dict[str, Any]) -> int:
+async def broadcast_hazard(hazard_doc: dict[str, Any]) -> int:
     coordinates = hazard_doc.get("location", {}).get("coordinates", [])
     if len(coordinates) != 2:
         return 0
@@ -56,7 +56,7 @@ async def broadcast_hazard_alert(hazard_doc: dict[str, Any]) -> int:
     rider_ids = await _nearby_rider_ids(lat, lng, settings.ALERT_RADIUS_M)
 
     payload = {
-        "type": "hazard_alert",
+        "type": "peer_alert",
         "hazard_type": hazard_doc.get("hazard_type", "unknown"),
         "lat": lat,
         "lng": lng,
@@ -76,3 +76,8 @@ async def broadcast_hazard_alert(hazard_doc: dict[str, Any]) -> int:
         sent_count,
     )
     return sent_count
+
+
+async def broadcast_hazard_alert(hazard_doc: dict[str, Any]) -> int:
+    # Backward-compatible alias for earlier service import sites.
+    return await broadcast_hazard(hazard_doc)

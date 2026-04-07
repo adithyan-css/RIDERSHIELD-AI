@@ -4,7 +4,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.db.mongo import get_mongo_db
-from app.services.broadcast_service import broadcast_hazard_alert
+from app.services.broadcast_service import broadcast_hazard
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ async def check_verification(hazard_doc: dict[str, Any]) -> dict[str, Any]:
         verified_doc["verified"] = True
         verified_doc["proof_score"] = proof_score
         verified_doc["supporting_riders"] = rider_count
-        await broadcast_hazard_alert(verified_doc)
+        await broadcast_hazard(verified_doc)
 
     logger.info(
         "Proof verified hazard_type=%s riders=%s updated=%s",
