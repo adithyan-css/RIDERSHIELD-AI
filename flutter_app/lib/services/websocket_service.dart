@@ -55,9 +55,30 @@ class WebSocketService extends ChangeNotifier {
         final alert = Alert.fromJson(data);
         _alertController.add(alert);
       }
+
+      if (data['type'] == 'AI_EVENT' && data['payload'] is Map<String, dynamic>) {
+        final alertJson = _toAlertJson(data['payload'] as Map<String, dynamic>);
+        final alert = Alert.fromJson(alertJson);
+        _alertController.add(alert);
+      }
     } catch (e) {
       debugPrint('Error parsing message: $e');
     }
+  }
+
+  Map<String, dynamic> _toAlertJson(Map<String, dynamic> payload) {
+    final location = (payload['location'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    final metadata = (payload['metadata'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    final eventType = (payload['event_type'] ?? 'hazard').toString();
+
+    return {
+      'id': (metadata['event_id'] ?? DateTime.now().millisecondsSinceEpoch.toString()).toString(),
+      'type': eventType,
+      'hazard_type': (metadata['hazard_type'] ?? eventType).toString(),
+      'lat': (location['lat'] as num?)?.toDouble() ?? 0.0,
+      'lng': (location['lng'] as num?)?.toDouble() ?? 0.0,
+      'message': (metadata['message'] ?? 'AI event detected').toString(),
+    };
   }
 
   void _reconnect() {

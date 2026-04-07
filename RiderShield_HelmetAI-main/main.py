@@ -3,7 +3,9 @@ import os
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import cv2
@@ -29,6 +31,18 @@ class IncidentJob:
     event_ts: float
     confidence: float
     signals: Dict
+
+
+class EventThrottler:
+    def __init__(self) -> None:
+        self._last_emit: Dict[str, float] = {}
+
+    def should_emit(self, key: str, now_ts: float, cooldown_s: float) -> bool:
+        last_ts = self._last_emit.get(key)
+        if last_ts is not None and (now_ts - last_ts) < cooldown_s:
+            return False
+        self._last_emit[key] = now_ts
+        return True
 
 
 class IncidentProcessor:
@@ -136,6 +150,37 @@ def draw_status_panel(frame: np.ndarray, app_state, incident_state: IncidentStat
     )
 
 
+def _build_stream_event(
+    *,
+    rider_id: str,
+    event_type: str,
+    confidence: float,
+    metadata_provider: MetadataProvider,
+    metadata_extra: Dict,
+) -> Dict:
+    runtime_metadata = metadata_provider.build_metadata()
+    event_metadata = {
+        "event_id": str(uuid.uuid4()),
+        "digipin": runtime_metadata.get("digipin"),
+        "source": "helmet_dashcam_stream",
+    }
+    for key, value in metadata_extra.items():
+        event_metadata[key] = value
+
+    return {
+        "event_id": event_metadata["event_id"],
+        "event_type": event_type,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "gps": runtime_metadata.get("gps", {}),
+        "digipin": runtime_metadata.get("digipin"),
+        "confidence": round(float(confidence), 4),
+        "signals": metadata_extra.get("signals", {}),
+        "source": "helmet_dashcam_stream",
+        "rider_id": rider_id,
+        "metadata": event_metadata,
+    }
+
+
 def main() -> None:
     args = parse_args()
 
@@ -174,6 +219,7 @@ def main() -> None:
     retry_manager = RetryManager(fallback_dir="failed_events", retry_interval=2.0)
     sos_manager = SOSManager(api_client=api_client, retry_manager=retry_manager)
     metadata_provider = MetadataProvider()
+    stream_throttler = EventThrottler()
 
     incident_processor = IncidentProcessor(
         recorder=recorder,
@@ -240,6 +286,45 @@ def main() -> None:
                                 signals=fusion_out["signals"],
                             )
                         )
+
+                    ttc_score = float(fusion_out["signals"].get("ttc", {}).get("score", 0.0))
+                    min_ttc = fusion_out["signals"].get("ttc", {}).get("min_ttc")
+                    if ttc_score >= 0.45 and stream_throttler.should_emit(
+                        "collision_risk",
+                        ts,
+                        cooldown_s=4.0,
+                    ):
+                        collision_event = _build_stream_event(
+                            rider_id=app.get_rider_id(),
+                            event_type="collision_risk",
+                            confidence=max(confidence, ttc_score),
+                            metadata_provider=metadata_provider,
+                            metadata_extra={
+                                "hazard_type": "forward_collision",
+                                "risk_score": ttc_score,
+                                "min_ttc": min_ttc,
+                                "signals": fusion_out["signals"],
+                            },
+                        )
+                        api_client.send_event_to_company(collision_event)
+
+                    if any(trk.get("alert_level") == "COLLISION" for trk in tracks) and stream_throttler.should_emit(
+                        "road_hazard",
+                        ts,
+                        cooldown_s=6.0,
+                    ):
+                        hazard_event = _build_stream_event(
+                            rider_id=app.get_rider_id(),
+                            event_type="hazard",
+                            confidence=max(confidence, 0.55),
+                            metadata_provider=metadata_provider,
+                            metadata_extra={
+                                "hazard_type": "traffic",
+                                "hazard_class": "traffic",
+                                "signals": fusion_out["signals"],
+                            },
+                        )
+                        api_client.send_event_to_company(hazard_event)
 
             if show_ui:
                 draw_zones(frame)

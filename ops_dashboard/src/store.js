@@ -45,6 +45,40 @@ export const useOpsStore = create((set, get) => ({
         }
         if (msg.type === 'alert_stream') get().addAlert(msg)
         if (msg.type === 'peer_alert') get().addAlert(msg)
+        if (msg.type === 'AI_EVENT') {
+          const payload = msg.payload || {}
+          const metadata = payload.metadata || {}
+          const location = payload.location || {}
+          const normalizedAlert = {
+            type: 'AI_EVENT',
+            event_type: payload.event_type,
+            rider_id: payload.rider_id,
+            timestamp: payload.timestamp,
+            confidence: payload.confidence,
+            hazard_type: metadata.hazard_type || payload.event_type,
+            message: metadata.message || `${payload.event_type || 'ai_event'} detected`,
+            lat: location.lat,
+            lng: location.lng,
+          }
+          get().addAlert(normalizedAlert)
+
+          const hazardTypes = new Set(['hazard', 'road_hazard', 'collision_risk'])
+          if (hazardTypes.has(payload.event_type)) {
+            const normalizedHazard = {
+              hazard_type: metadata.hazard_type || metadata.hazard_class || payload.event_type,
+              hazard_class: metadata.hazard_class || metadata.hazard_type || payload.event_type,
+              confidence: payload.confidence,
+              rider_id: payload.rider_id,
+              timestamp: payload.timestamp,
+              lat: location.lat,
+              lng: location.lng,
+              verified: false,
+              proof_score: metadata.proof_score || payload.confidence || 0,
+              cross_rider_count: metadata.cross_rider_count || 1,
+            }
+            set((s) => ({ hazards: [normalizedHazard, ...s.hazards].slice(0, 200) }))
+          }
+        }
       }
     }
 

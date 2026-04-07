@@ -12,22 +12,28 @@ class SOSManager:
         self.retry_manager = retry_manager
 
         def sender(event: Dict) -> bool:
-            ok_company = self.api_client.send_event_to_company(event)
-            ok_rider = self.api_client.send_event_to_rider(event)
-            return ok_company and ok_rider
+            return self.api_client.send_event_to_company(self._with_channels(event))
 
         self.retry_manager.start(sender)
 
-    def handle_incident_event(self, event: Dict) -> None:
-        ok_company = self.api_client.send_event_to_company(event)
-        ok_rider = self.api_client.send_event_to_rider(event)
+    @staticmethod
+    def _with_channels(event: Dict) -> Dict:
+        outgoing = dict(event)
+        metadata = dict(outgoing.get("metadata", {}))
+        metadata["channels"] = ["company", "rider"]
+        outgoing["metadata"] = metadata
+        return outgoing
 
-        if ok_company and ok_rider:
-            print("Event sent successfully to company+rider")
+    def handle_incident_event(self, event: Dict) -> None:
+        outbound = self._with_channels(event)
+        ok = self.api_client.send_event_to_company(outbound)
+
+        if ok:
+            print("Event sent successfully")
             return
 
         print("Event send failed, enqueued for retry")
-        self.retry_manager.enqueue(event)
+        self.retry_manager.enqueue(outbound)
 
     def shutdown(self) -> None:
         self.retry_manager.stop()

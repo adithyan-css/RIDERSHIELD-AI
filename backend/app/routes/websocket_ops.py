@@ -33,14 +33,20 @@ class OpsConnectionManager:
         async with self._lock:
             sockets = list(self._ops_connections.get(company_id, set()))
 
-        sent = 0
-        for ws in sockets:
+        async def _send(ws: WebSocket) -> bool:
             try:
                 await ws.send_json(message)
-                sent += 1
+                return True
             except Exception:
-                await self.disconnect_ops(ws, company_id)
-        return sent
+                return False
+
+        results = await asyncio.gather(*(_send(ws) for ws in sockets), return_exceptions=True)
+        failed = [ws for ws, result in zip(sockets, results) if result is not True]
+        if failed:
+            async with self._lock:
+                for ws in failed:
+                    self._ops_connections[company_id].discard(ws)
+        return sum(1 for result in results if result is True)
 
     async def broadcast_all(self, message: dict) -> int:
         async with self._lock:
@@ -48,14 +54,17 @@ class OpsConnectionManager:
             for sockets in self._ops_connections.values():
                 targets.update(sockets)
 
-        sent = 0
-        failed: list[WebSocket] = []
-        for ws in targets:
+        sockets = list(targets)
+
+        async def _send(ws: WebSocket) -> bool:
             try:
                 await ws.send_json(message)
-                sent += 1
+                return True
             except Exception:
-                failed.append(ws)
+                return False
+
+        results = await asyncio.gather(*(_send(ws) for ws in sockets), return_exceptions=True)
+        failed = [ws for ws, result in zip(sockets, results) if result is not True]
 
         if failed:
             async with self._lock:
@@ -65,7 +74,7 @@ class OpsConnectionManager:
                     for ws in failed:
                         self._ops_connections[company_id].discard(ws)
 
-        return sent
+        return sum(1 for result in results if result is True)
 
 
 ops_connection_manager = OpsConnectionManager()

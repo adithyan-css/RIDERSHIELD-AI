@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -30,20 +31,36 @@ class AIEventService:
     async def process_event(self, payload: dict[str, Any], source: str = "api") -> dict[str, Any]:
         event = AIEventIn.model_validate(payload)
         normalized = self._normalize_event(event, source=source)
+        metadata = normalized.get("metadata", {})
+        event_key = str(metadata.get("event_id", "")).strip()
+        if not event_key:
+            raise ValueError("metadata.event_id is required")
 
         db = get_mongo_db()
-        insert_result = await db.ai_events.insert_one(normalized)
-        event_id = str(insert_result.inserted_id)
-
-        workflow_results = await asyncio.gather(
-            self._trigger_hazard_workflow(normalized),
-            self._trigger_sos_workflow(normalized),
-            self._trigger_alert_workflow(normalized),
-            return_exceptions=True,
+        upsert_result = await db.ai_events.update_one(
+            {"metadata.event_id": event_key},
+            {
+                "$set": normalized,
+                "$setOnInsert": {"created_at": datetime.now(timezone.utc).isoformat()},
+            },
+            upsert=True,
         )
-        for idx, result in enumerate(workflow_results):
-            if isinstance(result, Exception):
-                logger.exception("AI event workflow[%s] failed", idx, exc_info=result)
+        stored = await db.ai_events.find_one({"metadata.event_id": event_key}, {"_id": 1})
+        event_id = str(stored["_id"]) if stored and "_id" in stored else event_key
+        is_new_event = upsert_result.upserted_id is not None
+
+        if is_new_event:
+            workflow_results = await asyncio.gather(
+                self._trigger_hazard_workflow(normalized),
+                self._trigger_sos_workflow(normalized),
+                self._trigger_alert_workflow(normalized),
+                return_exceptions=True,
+            )
+            for idx, result in enumerate(workflow_results):
+                if isinstance(result, Exception):
+                    logger.exception("AI event workflow[%s] failed", idx, exc_info=result)
+        else:
+            logger.info("Duplicate AI event ignored for workflows event_id=%s", event_key)
 
         logger.info(
             "AI event processed id=%s rider_id=%s event_type=%s source=%s",
@@ -71,11 +88,19 @@ class AIEventService:
 
         event_type = event.event_type.strip().lower()
         metadata = dict(event.metadata)
+        event_id = str(metadata.get("event_id", "")).strip()
+        if not event_id:
+            fingerprint = (
+                f"{event.rider_id.strip()}|{timestamp.isoformat()}|{event_type}|"
+                f"{float(event.location.lat):.6f}|{float(event.location.lng):.6f}|{float(event.confidence):.4f}"
+            )
+            event_id = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+            metadata["event_id"] = event_id
 
         return {
             "rider_id": event.rider_id.strip(),
             "timestamp": timestamp.isoformat(),
-            "timestamp_dt": timestamp,
+            "timestamp_dt": timestamp.isoformat(),
             "location": {
                 "lat": float(event.location.lat),
                 "lng": float(event.location.lng),
@@ -88,7 +113,7 @@ class AIEventService:
             "confidence": float(event.confidence),
             "metadata": metadata,
             "source": source,
-            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     async def _trigger_hazard_workflow(self, event: dict[str, Any]) -> None:

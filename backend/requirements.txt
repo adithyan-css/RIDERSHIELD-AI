@@ -14,3 +14,4 @@ pydantic==2.7.1
 pydantic-settings==2.2.1
 geopy==2.4.1
 pygeohash==1.2.0
+websockets==12.0

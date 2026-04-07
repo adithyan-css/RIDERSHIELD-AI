@@ -74,11 +74,36 @@ class WSClient extends StateNotifier<WebSocketState> {
       case 'peer_alert':
         _handlePeerAlert(data);
         break;
+      case 'AI_EVENT':
+        _handlePeerAlert(_mapAiEventToAlert(data));
+        break;
       case 'gp_surface_update':
       case 'reroute_suggestion':
       default:
         break;
     }
+  }
+
+  Map<String, dynamic> _mapAiEventToAlert(Map<String, dynamic> data) {
+    final payload = (data['payload'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    final location = (payload['location'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    final metadata = (payload['metadata'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+    final eventType = (payload['event_type'] ?? 'hazard').toString();
+
+    return {
+      'title': 'AI Event',
+      'hazard_type': (metadata['hazard_type'] ?? eventType).toString(),
+      'severity': (metadata['severity'] ?? 'medium').toString(),
+      'direction': (metadata['direction'] ?? 'ahead').toString(),
+      'distance': (metadata['distance'] as num?)?.toDouble() ?? 0,
+      'description': (metadata['message'] ?? 'AI event detected').toString(),
+      'has_voice': true,
+      'voice_progress': 0,
+      'suggests_reroute': (eventType == 'collision_risk'),
+      'lat': (location['lat'] as num?)?.toDouble() ?? 0,
+      'lng': (location['lng'] as num?)?.toDouble() ?? 0,
+      'confidence': (payload['confidence'] as num?)?.toDouble() ?? 0.5,
+    };
   }
 
   void _handlePeerAlert(Map<String, dynamic> data) {

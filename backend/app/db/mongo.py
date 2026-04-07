@@ -57,6 +57,11 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.ai_events.create_index([("timestamp_dt", DESCENDING)])
     await db.ai_events.create_index([("rider_id", ASCENDING), ("timestamp_dt", DESCENDING)])
     await db.ai_events.create_index([("event_type", ASCENDING), ("timestamp_dt", DESCENDING)])
+    await db.ai_events.create_index(
+        [("metadata.event_id", ASCENDING)],
+        unique=True,
+        sparse=True,
+    )
 
     await db.sos_events.create_index([("location", GEOSPHERE)])
     await db.sos_events.create_index([("timestamp", DESCENDING)])

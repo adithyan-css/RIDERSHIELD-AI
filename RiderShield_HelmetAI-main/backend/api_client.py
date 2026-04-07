@@ -16,6 +16,7 @@ class BackendAPIClient:
     def __init__(
         self,
         backend_url: str | None = None,
+        api_key: str | None = None,
         mqtt_host: str | None = None,
         mqtt_port: int | None = None,
         mqtt_topic: str | None = None,
@@ -24,12 +25,16 @@ class BackendAPIClient:
         backoff_base_s: float = 0.5,
         failure_rate: float = 0.0,
     ) -> None:
-        self.backend_url = (backend_url or os.getenv("RIDERSHIELD_API_URL") or "http://127.0.0.1:8000").rstrip("/")
-        self.ai_event_endpoint = f"{self.backend_url}/api/ai/event"
+        self.backend_url = (backend_url or os.getenv("RIDERSHIELD_API_URL") or "").rstrip("/")
+        self.api_key = api_key or os.getenv("RIDERSHIELD_API_KEY") or ""
 
-        self.mqtt_host = mqtt_host or os.getenv("RIDERSHIELD_MQTT_HOST") or "127.0.0.1"
+        self.mqtt_host = mqtt_host or os.getenv("RIDERSHIELD_MQTT_HOST") or ""
         self.mqtt_port = int(mqtt_port or os.getenv("RIDERSHIELD_MQTT_PORT") or 1883)
-        self.mqtt_topic = mqtt_topic or os.getenv("RIDERSHIELD_MQTT_TOPIC") or "rider/events"
+        self.mqtt_topic = mqtt_topic or os.getenv("RIDERSHIELD_MQTT_TOPIC") or ""
+
+        self._validate_required_config()
+
+        self.ai_event_endpoint = f"{self.backend_url}/api/ai/event"
 
         self.timeout_s = timeout_s
         self.max_attempts = max(1, max_attempts)
@@ -56,12 +61,11 @@ class BackendAPIClient:
         delay_s = self.backoff_base_s
         for attempt in range(1, self.max_attempts + 1):
             if self._simulate_failure():
-                ok_http, ok_mqtt = False, False
+                ok = False
             else:
-                ok_http = self._post_event_http(payload)
-                ok_mqtt = self._publish_event_mqtt(payload)
+                ok = self._send_once(payload)
 
-            if ok_http or ok_mqtt:
+            if ok:
                 return True
 
             if attempt < self.max_attempts:
@@ -74,14 +78,11 @@ class BackendAPIClient:
         delay_s = self.backoff_base_s
         for attempt in range(1, self.max_attempts + 1):
             if self._simulate_failure():
-                ok_http, ok_mqtt = False, False
+                ok = False
             else:
-                ok_http, ok_mqtt = await asyncio.gather(
-                    asyncio.to_thread(self._post_event_http, payload),
-                    asyncio.to_thread(self._publish_event_mqtt, payload),
-                )
+                ok = await asyncio.to_thread(self._send_once, payload)
 
-            if ok_http or ok_mqtt:
+            if ok:
                 return True
 
             if attempt < self.max_attempts:
@@ -90,13 +91,22 @@ class BackendAPIClient:
 
         return False
 
+    def _send_once(self, payload: Dict[str, Any]) -> bool:
+        # Transport strategy: HTTP first, MQTT fallback. Never emit on both channels.
+        if self._post_event_http(payload):
+            return True
+        return self._publish_event_mqtt(payload)
+
     def _post_event_http(self, payload: Dict[str, Any]) -> bool:
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
             self.ai_event_endpoint,
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": self.api_key,
+            },
         )
 
         try:
@@ -127,6 +137,41 @@ class BackendAPIClient:
     def _simulate_failure(self) -> bool:
         return self.failure_rate > 0 and random.random() < self.failure_rate
 
+    def _validate_required_config(self) -> None:
+        required = {
+            "RIDERSHIELD_API_URL": self.backend_url,
+            "RIDERSHIELD_API_KEY": self.api_key,
+            "RIDERSHIELD_MQTT_HOST": self.mqtt_host,
+            "RIDERSHIELD_MQTT_TOPIC": self.mqtt_topic,
+        }
+        missing = [name for name, value in required.items() if not str(value).strip()]
+        if missing:
+            joined = ", ".join(missing)
+            raise RuntimeError(f"Missing required RiderShield configuration: {joined}")
+
+    @staticmethod
+    def _to_iso_timestamp(raw_timestamp: Any) -> str:
+        if isinstance(raw_timestamp, datetime):
+            ts = raw_timestamp
+        elif isinstance(raw_timestamp, (int, float)):
+            ts = datetime.fromtimestamp(float(raw_timestamp), tz=timezone.utc)
+        elif isinstance(raw_timestamp, str) and raw_timestamp.strip():
+            text = raw_timestamp.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                ts = datetime.fromisoformat(text)
+            except ValueError:
+                ts = datetime.now(timezone.utc)
+        else:
+            ts = datetime.now(timezone.utc)
+
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        else:
+            ts = ts.astimezone(timezone.utc)
+        return ts.isoformat()
+
     @staticmethod
     def _to_unified_event(event: Dict[str, Any], channel: str) -> Dict[str, Any]:
         gps = event.get("gps") or event.get("location") or {}
@@ -134,8 +179,7 @@ class BackendAPIClient:
         lng = float(gps.get("lng", gps.get("lon", 0.0)))
 
         timestamp = event.get("timestamp")
-        if not timestamp:
-            timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp_iso = BackendAPIClient._to_iso_timestamp(timestamp)
 
         metadata = {
             "channel": channel,
@@ -151,7 +195,7 @@ class BackendAPIClient:
 
         return {
             "rider_id": str(event.get("rider_id", "unknown_rider")),
-            "timestamp": str(timestamp),
+            "timestamp": timestamp_iso,
             "location": {"lat": lat, "lng": lng},
             "event_type": str(event.get("event_type", "unknown")).lower(),
             "confidence": float(event.get("confidence", 0.0)),
