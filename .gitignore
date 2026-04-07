@@ -1,0 +1,59 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+env/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Node / frontend
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+dist/
+build/
+coverage/
+
+# Flutter / Dart
+.flutter-plugins
+.flutter-plugins-dependencies
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+.flutter/
+flutter_app/build/
+flutter_app/.dart_tool/
+flutter_app/.packages
+flutter_app/android/.gradle/
+flutter_app/android/local.properties
+
+# Logs
+*.log
+
+# Docker
+*.pid
+
+# Misc
+tmp/
+temp/
