@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     MQTT_PORT: int = 1883
     MQTT_KEEPALIVE: int = 60
     MQTT_TOPIC_HFV: str = "ridershield/hfv/#"
+    MQTT_TOPIC_AI_EVENTS: str = "rider/events"
 
     PROOF_RADIUS_M: int = 50
     PROOF_WINDOW_MINUTES: int = 10

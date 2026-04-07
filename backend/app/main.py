@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.mqtt_client import start_mqtt_client, stop_mqtt_client
 from app.core.redis_client import close_redis, connect_redis
 from app.db.mongo import close_mongo, connect_mongo
-from app.routes import delivery, hazard, hfv, ops, rider, websocket_ops
+from app.routes import ai_event, delivery, hazard, hfv, ops, rider, websocket_ops
 from app.workers.gp_worker import gp_worker_loop
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ def _setup_logging() -> None:
 def _register_routes(app: FastAPI) -> None:
     for prefix in ("", "/api"):
         app.include_router(hfv.router, prefix=prefix, tags=["HFV"])
+        app.include_router(ai_event.router, prefix=prefix, tags=["AI-Events"])
         app.include_router(hazard.router, prefix=prefix, tags=["Hazards"])
         app.include_router(rider.router, prefix=prefix, tags=["Riders"])
         app.include_router(delivery.router, prefix=prefix, tags=["Delivery"])

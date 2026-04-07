@@ -1,0 +1,14 @@
+ultralytics
+opencv-python
+numpy
+torch
+torchvision
+timm
+pyttsx3
+torchaudio
+deepface
+tensorflow
+tensorflow_hub
+librosa
+sounddevice
+paho-mqtt

@@ -6,6 +6,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 
 from app.core.config import settings
+from app.mqtt.ai_event_listener import handle_ai_event_message
 from app.services.hazard_service import process_hfv
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,9 @@ class MQTTIngestionClient:
             return
 
         client.subscribe(settings.MQTT_TOPIC_HFV)
+        client.subscribe(settings.MQTT_TOPIC_AI_EVENTS)
         logger.info("Subscribed to topic %s", settings.MQTT_TOPIC_HFV)
+        logger.info("Subscribed to topic %s", settings.MQTT_TOPIC_AI_EVENTS)
 
     def _on_message(self, client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
         try:
@@ -80,19 +83,28 @@ class MQTTIngestionClient:
             logger.exception("Failed to decode MQTT payload")
             return
 
-        future = asyncio.run_coroutine_threadsafe(
-            process_hfv(payload, source="mqtt"),
-            self._loop,
-        )
-        future.add_done_callback(self._log_result)
+        topic = msg.topic or ""
+        if mqtt.topic_matches_sub(settings.MQTT_TOPIC_HFV, topic):
+            coro = process_hfv(payload, source="mqtt")
+            callback = lambda fut: self._log_result(fut, topic=topic, channel="hfv")
+        elif mqtt.topic_matches_sub(settings.MQTT_TOPIC_AI_EVENTS, topic):
+            coro = handle_ai_event_message(payload, topic=topic)
+            callback = lambda fut: self._log_result(fut, topic=topic, channel="ai_event")
+        else:
+            logger.debug("MQTT message ignored topic=%s", topic)
+            return
+
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        future.add_done_callback(callback)
 
     @staticmethod
-    def _log_result(future: asyncio.Future[Any]) -> None:
+    def _log_result(future: asyncio.Future[Any], topic: str, channel: str) -> None:
         try:
             result = future.result()
-            logger.debug("MQTT HFV processed id=%s", result.get("id"))
+            result_id = result.get("id") if isinstance(result, dict) else None
+            logger.debug("MQTT %s processed topic=%s id=%s", channel, topic, result_id)
         except Exception:
-            logger.exception("MQTT HFV processing failed")
+            logger.exception("MQTT %s processing failed topic=%s", channel, topic)
 
 
 _mqtt_client: MQTTIngestionClient | None = None
