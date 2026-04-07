@@ -1,151 +1,171 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/rider_provider.dart';
-import '../services/api_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class ProfileScreen extends StatefulWidget {
+import '../providers/auth_provider.dart';
+import 'login_screen.dart';
+
+class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final rider = ref.watch(authProvider).rider;
 
-class _ProfileScreenState extends State<ProfileScreen> {
-  Map<String, dynamic>? _history;
-  bool _loading = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadHistory();
-  }
-
-  Future<void> _loadHistory() async {
-    setState(() => _loading = true);
-    try {
-      final h = await ApiService.getRiderHistory();
-      setState(() => _history = h);
-    } catch (_) {}
-    setState(() => _loading = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    const teal = Color(0xFF00C8A0);
-    final rider = context.watch<RiderProvider>();
-    final hazards = (_history?['hazards'] as List?) ?? [];
-    final deliveries = (_history?['deliveries'] as List?) ?? [];
+    if (rider == null) {
+      return const Scaffold(
+        body: Center(child: Text('Not logged in')),
+      );
+    }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0F1E),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D1526),
-        title: const Text('Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.redAccent),
-            onPressed: () => rider.logout(),
-          )
-        ],
+        title: const Text('Profile'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Column(children: [
-          // Profile card
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D1526),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(children: [
-              CircleAvatar(
-                radius: 30,
-                backgroundColor: teal.withOpacity(0.2),
-                child: const Icon(Icons.person, color: Color(0xFF00C8A0), size: 32),
-              ),
-              const SizedBox(width: 16),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(rider.name ?? 'Rider',
-                    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
-                Text('ID: ${rider.riderId?.substring(0, 8)}...',
-                    style: const TextStyle(color: Colors.white38, fontSize: 12)),
-              ]),
-            ]),
-          ),
-          const SizedBox(height: 16),
-          // Stats row
-          Row(children: [
-            _StatCard(label: 'Hazards Reported', value: hazards.length.toString(), color: const Color(0xFF3B8BD4)),
-            const SizedBox(width: 12),
-            _StatCard(label: 'Deliveries', value: deliveries.length.toString(), color: teal),
-          ]),
-          const SizedBox(height: 16),
-          // Hazard history
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Recent Hazards', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-          ),
-          const SizedBox(height: 8),
-          if (_loading)
-            const Center(child: CircularProgressIndicator(color: Color(0xFF00C8A0)))
-          else if (hazards.isEmpty)
-            const Text('No hazards reported yet', style: TextStyle(color: Colors.white38, fontSize: 13))
-          else
-            ...hazards.take(5).map((h) => Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0D1526),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white10),
-                  ),
-                  child: Row(children: [
-                    const Icon(Icons.warning_amber, color: Colors.orangeAccent, size: 18),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(h['hazard_class'] ?? 'unknown',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13)),
-                        Text('Confidence: ${((h['confidence'] ?? 0) * 100).toStringAsFixed(0)}%',
-                            style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                      ]),
+        child: Column(
+          children: [
+            // Profile Header
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      child: Text(
+                        rider.name.isNotEmpty ? rider.name[0].toUpperCase() : 'R',
+                        style: const TextStyle(
+                          fontSize: 40,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
-                    Text(h['verified'] == true ? '✓ Verified' : 'Pending',
-                        style: TextStyle(
-                            color: h['verified'] == true ? teal : Colors.white38,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600)),
-                  ]),
-                )),
-        ]),
+                    const SizedBox(height: 16),
+                    Text(
+                      rider.name,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      rider.phone,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Colors.grey,
+                          ),
+                    ),
+                    if (rider.rating != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.star, color: Colors.amber, size: 20),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${rider.rating}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Stats
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _statColumn('Rides', '156'),
+                    _statColumn('Distance', '1,240 km'),
+                    _statColumn('Safety Score', '94%'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Menu Items
+            Card(
+              child: Column(
+                children: [
+                  _menuItem(Icons.person_outline, 'Edit Profile', () {}),
+                  _menuItem(Icons.history, 'Ride History', () {}),
+                  _menuItem(Icons.payment, 'Payment Methods', () {}),
+                  _menuItem(Icons.notifications_outlined, 'Notifications', () {}),
+                  _menuItem(Icons.help_outline, 'Help & Support', () {}),
+                  _menuItem(Icons.settings, 'Settings', () {}),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Logout Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  ref.read(authProvider.notifier).logout();
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (route) => false,
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                icon: const Icon(Icons.logout),
+                label: const Text(
+                  'LOGOUT',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
-}
 
-class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  const _StatCard({required this.label, required this.value, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0D1526),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withOpacity(0.3)),
+  Widget _statColumn(String label, String value) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-        child: Column(children: [
-          Text(value, style: TextStyle(color: color, fontSize: 28, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12), textAlign: TextAlign.center),
-        ]),
-      ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey.shade400,
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _menuItem(IconData icon, String title, VoidCallback onTap) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onTap,
     );
   }
 }

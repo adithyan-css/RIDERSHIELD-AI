@@ -19,6 +19,7 @@ def main() -> int:
     run_id = uuid.uuid4().hex[:8]
     rider_a = f"smoke_rider_a_{run_id}"
     rider_b = f"smoke_rider_b_{run_id}"
+    rider_c = f"smoke_rider_c_{run_id}"
     rider_mqtt = f"smoke_rider_mqtt_{run_id}"
     lat = 11.0168
     lng = 76.9558
@@ -42,10 +43,18 @@ def main() -> int:
             "company_id": "smoke_company",
             "password": "smoke",
         })
-        print("register:", reg_a["rider_id"], reg_b["rider_id"])
+        reg_c = post_json(client, "/rider/register", {
+            "rider_id": rider_c,
+            "name": "Smoke Rider C",
+            "phone": f"+91000{run_id}3",
+            "company_id": "smoke_company",
+            "password": "smoke",
+        })
+        print("register:", reg_a["rider_id"], reg_b["rider_id"], reg_c["rider_id"])
 
         post_json(client, "/rider/location", {"rider_id": rider_a, "lat": lat, "lng": lng})
         post_json(client, "/rider/location", {"rider_id": rider_b, "lat": lat + 0.00015, "lng": lng + 0.00015})
+        post_json(client, "/rider/location", {"rider_id": rider_c, "lat": lat + 0.00020, "lng": lng + 0.00005})
         print("location updates: ok")
 
         h1 = post_json(client, "/hfv", {
@@ -66,7 +75,17 @@ def main() -> int:
             "depth_cm": 13,
             "rain_raw": 500,
         })
-        print("hfv api:", h1["id"], h2["id"])
+        h3 = post_json(client, "/hfv", {
+            "rider_id": rider_c,
+            "lat": lat + 0.0002,
+            "lng": lng + 0.00005,
+            "hazard_type": "flood",
+            "confidence": 0.95,
+            "depth_cm": 14,
+            "rain_raw": 520,
+            "accel_rms": 2.8,
+        })
+        print("hfv api:", h1["id"], h2["id"], h3["id"])
 
         batch = client.post(
             f"{API_BASE}/hfv/batch",
@@ -79,7 +98,7 @@ def main() -> int:
                     "confidence": 0.89,
                 },
                 {
-                    "rider_id": rider_b,
+                    "rider_id": rider_c,
                     "lat": lat + 0.00025,
                     "lng": lng + 0.00025,
                     "hazard_type": "flood",
@@ -116,7 +135,7 @@ def main() -> int:
     print("mqtt publish:", published["ok"])
 
     verified = []
-    for _ in range(12):
+    for _ in range(20):
         with httpx.Client() as client:
             response = client.get(
                 f"{API_BASE}/hazards/verified",

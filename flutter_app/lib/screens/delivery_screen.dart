@@ -1,248 +1,229 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import '../services/api_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class DeliveryScreen extends StatefulWidget {
+import '../services/api_service.dart';
+import '../providers/auth_provider.dart';
+
+class DeliveryScreen extends ConsumerStatefulWidget {
   const DeliveryScreen({super.key});
 
   @override
-  State<DeliveryScreen> createState() => _DeliveryScreenState();
+  ConsumerState<DeliveryScreen> createState() => _DeliveryScreenState();
 }
 
-class _DeliveryScreenState extends State<DeliveryScreen> {
-  final _digipinCtrl = TextEditingController();
-  final _orderCtrl = TextEditingController();
-  Map<String, dynamic>? _resolved;
-  Map<String, dynamic>? _activeDelivery;
-  bool _loading = false;
+class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
+  final _digiPinController = TextEditingController();
+  bool _isLoading = false;
+  Map<String, dynamic>? _resolvedLocation;
   String? _error;
+  String? _activeDeliveryId;
 
-  Future<void> _resolve() async {
-    final code = _digipinCtrl.text.trim();
-    if (code.isEmpty) return;
-    setState(() { _loading = true; _error = null; });
+  Future<void> _resolveDigipin() async {
+    if (_digiPinController.text.isEmpty) return;
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
     try {
-      final res = await ApiService.resolveDigipin(code);
-      setState(() => _resolved = res);
+      final api = ref.read(apiServiceProvider);
+      final result = await api.resolveDigipin(_digiPinController.text);
+      setState(() {
+        _resolvedLocation = result;
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() => _error = 'Could not resolve DIGIPIN');
-    } finally {
-      setState(() => _loading = false);
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   Future<void> _startDelivery() async {
-    if (_resolved == null || _orderCtrl.text.isEmpty) return;
-    setState(() => _loading = true);
+    if (_resolvedLocation == null) return;
+
+    setState(() => _isLoading = true);
+
     try {
-      final res = await ApiService.startDelivery(
-        _orderCtrl.text.trim(),
-        _digipinCtrl.text.trim(),
-        'PICKUP-${_digipinCtrl.text.trim()}',
-      );
-      setState(() => _activeDelivery = res);
+      final api = ref.read(apiServiceProvider);
+      final delivery = await api.startDelivery(_resolvedLocation!['delivery_id']);
+      setState(() {
+        _activeDeliveryId = delivery.id;
+        _isLoading = false;
+      });
     } catch (e) {
-      setState(() => _error = 'Failed to start delivery');
-    } finally {
-      setState(() => _loading = false);
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   Future<void> _verifyDelivery() async {
-    if (_activeDelivery == null) return;
-    setState(() => _loading = true);
+    if (_activeDeliveryId == null) return;
+
+    setState(() => _isLoading = true);
+
     try {
-      await ApiService.verifyDelivery(_activeDelivery!['delivery_id'], true, null);
-      setState(() { _activeDelivery = null; _resolved = null; _digipinCtrl.clear(); _orderCtrl.clear(); });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Delivery verified!'), backgroundColor: Color(0xFF00C8A0)));
-      }
-    } finally {
-      setState(() => _loading = false);
+      final api = ref.read(apiServiceProvider);
+      await api.verifyDelivery(_activeDeliveryId!, _digiPinController.text);
+      setState(() {
+        _activeDeliveryId = null;
+        _resolvedLocation = null;
+        _digiPinController.clear();
+        _isLoading = false;
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Delivery verified successfully!')),
+      );
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    const teal = Color(0xFF00C8A0);
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0F1E),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D1526),
-        title: const Text('Delivery', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        title: const Text('Delivery'),
       ),
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(children: [
-          // DIGIPIN resolver
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D1526),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('DIGIPIN Resolver',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 4),
-              const Text('Enter 10-digit DIGIPIN code for delivery location',
-                  style: TextStyle(color: Colors.white38, fontSize: 12)),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _digipinCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'e.g. 5F3-KJ2-9P4Q',
-                  hintStyle: const TextStyle(color: Colors.white24),
-                  filled: true,
-                  fillColor: const Color(0xFF131C33),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                  suffixIcon: IconButton(
-                    icon: _loading
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00C8A0)))
-                        : const Icon(Icons.search, color: Color(0xFF00C8A0)),
-                    onPressed: _resolve,
-                  ),
-                ),
-                onSubmitted: (_) => _resolve(),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
-              ],
-            ]),
-          ),
-
-          // Resolved result
-          if (_resolved != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: teal.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: teal.withOpacity(0.3)),
-              ),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  const Icon(Icons.location_on, color: Color(0xFF00C8A0), size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _resolved!['address'] ?? '',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 8),
-                Text(
-                  'Lat: ${_resolved!['lat']?.toStringAsFixed(6)}  Lng: ${_resolved!['lng']?.toStringAsFixed(6)}',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-                Text(
-                  'Cell size: ${_resolved!['cell_size_m']}m',
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                ),
-                const SizedBox(height: 12),
-                // Mini map
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: SizedBox(
-                    height: 160,
-                    child: FlutterMap(
-                      options: MapOptions(
-                        initialCenter: LatLng(
-                          (_resolved!['lat'] as num).toDouble(),
-                          (_resolved!['lng'] as num).toDouble(),
-                        ),
-                        initialZoom: 17,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // DIGIPIN Input
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _digiPinController,
+                      decoration: const InputDecoration(
+                        labelText: 'Enter DIGIPIN',
+                        hintText: 'e.g., 123456',
+                        prefixIcon: Icon(Icons.pin),
+                        border: OutlineInputBorder(),
                       ),
-                      children: [
-                        TileLayer(
-                          urlTemplate:
-                              'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                          subdomains: const ['a', 'b', 'c', 'd'],
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                    ),
+                    const SizedBox(height: 16),
+                    if (_activeDeliveryId == null)
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _isLoading ? null : _resolveDigipin,
+                          icon: _isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.search),
+                          label: const Text('RESOLVE LOCATION'),
                         ),
-                        MarkerLayer(markers: [
-                          Marker(
-                            point: LatLng(
-                              (_resolved!['lat'] as num).toDouble(),
-                              (_resolved!['lng'] as num).toDouble(),
-                            ),
-                            child: const Icon(Icons.location_pin, color: Color(0xFF00C8A0), size: 32),
+                      )
+                    else
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _isLoading ? null : _verifyDelivery,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
                           ),
-                        ]),
-                      ],
-                    ),
-                  ),
+                          icon: const Icon(Icons.check_circle),
+                          label: const Text('VERIFY DELIVERY'),
+                        ),
+                      ),
+                  ],
                 ),
-              ]),
+              ),
             ),
-            const SizedBox(height: 12),
-            // Start delivery
-            if (_activeDelivery == null) ...[
-              TextField(
-                controller: _orderCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Order ID',
-                  hintStyle: const TextStyle(color: Colors.white24),
-                  prefixIcon: const Icon(Icons.receipt_long_outlined, color: Colors.white38),
-                  filled: true,
-                  fillColor: const Color(0xFF131C33),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: teal, foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                  onPressed: _loading ? null : _startDelivery,
-                  icon: const Icon(Icons.local_shipping),
-                  label: const Text('Start Delivery', style: TextStyle(fontWeight: FontWeight.w700)),
-                ),
-              ),
-            ] else ...[
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0D1526),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.orangeAccent.withOpacity(0.4)),
-                ),
-                child: Column(children: [
-                  const Row(children: [
-                    Icon(Icons.local_shipping, color: Colors.orangeAccent, size: 18),
-                    SizedBox(width: 8),
-                    Text('Delivery In Progress', style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.w600)),
-                  ]),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 46,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.greenAccent, foregroundColor: Colors.black,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      onPressed: _loading ? null : _verifyDelivery,
-                      icon: const Icon(Icons.check_circle),
-                      label: const Text('Mark Delivered', style: TextStyle(fontWeight: FontWeight.w700)),
-                    ),
+            const SizedBox(height: 16),
+
+            // Location Details
+            if (_resolvedLocation != null)
+              Card(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.location_on,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _resolvedLocation!['address']?.toString() ?? 'Unknown Address',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Customer: ${_resolvedLocation!['customer_name'] ?? 'Unknown'}',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 16),
+                      if (_activeDeliveryId == null)
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _startDelivery,
+                            child: const Text('START DELIVERY'),
+                          ),
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.local_shipping, color: Colors.green),
+                              SizedBox(width: 8),
+                              Text(
+                                'Delivery In Progress',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
-                ]),
+                ),
               ),
-            ],
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  textAlign: TextAlign.center,
+                ),
+              ),
           ],
-        ]),
+        ),
       ),
     );
   }

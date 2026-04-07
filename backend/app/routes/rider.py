@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from app.core.redis_client import cache_rider_location
 from app.core.websocket_manager import websocket_manager
 from app.db.mongo import get_mongo_db
 from app.models.rider import RiderAuthOut, RiderLocationIn, RiderLoginIn, RiderRegisterIn
+from app.services.broadcast_service import broadcast_fleet_update
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,12 @@ async def update_rider_location(body: RiderLocationIn):
     db = get_mongo_db()
     ts = body.last_seen or datetime.now(timezone.utc)
 
+    rider_company_doc = await db.riders.find_one(
+        {"rider_id": body.rider_id},
+        {"company_id": 1},
+    )
+    company_id = rider_company_doc.get("company_id") if rider_company_doc else None
+
     await db.riders.update_one(
         {"rider_id": body.rider_id},
         {
@@ -84,6 +92,10 @@ async def update_rider_location(body: RiderLocationIn):
 
     await _cache_rider_location(body.rider_id, body.lat, body.lng, ts.isoformat())
     await websocket_manager.update_rider_location(body.rider_id, body.lat, body.lng)
+
+    if company_id:
+        asyncio.create_task(broadcast_fleet_update(str(company_id)))
+
     return {"status": "updated", "rider_id": body.rider_id}
 
 

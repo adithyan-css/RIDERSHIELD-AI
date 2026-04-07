@@ -1,10 +1,12 @@
 import logging
 import math
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.config import settings
 from app.core.redis_client import get_all_rider_locations
 from app.core.websocket_manager import websocket_manager
+from app.db.mongo import get_mongo_db
 
 logger = logging.getLogger(__name__)
 
@@ -71,3 +73,31 @@ async def broadcast_hazard(hazard_doc: dict[str, Any]) -> int:
 async def broadcast_hazard_alert(hazard_doc: dict[str, Any]) -> int:
     # Backward-compatible alias for earlier service import sites.
     return await broadcast_hazard(hazard_doc)
+
+
+async def broadcast_fleet_update(company_id: str) -> None:
+    db = get_mongo_db()
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=90)
+    cursor = db.riders.find({"company_id": company_id, "last_seen": {"$gte": cutoff}})
+    riders = await cursor.to_list(length=500)
+
+    fleet = []
+    for rider in riders:
+        loc = rider.get("location", {}).get("coordinates")
+        last_seen = rider.get("last_seen")
+        fleet.append(
+            {
+                "rider_id": str(rider.get("rider_id", "")),
+                "name": rider.get("name", ""),
+                "lat": loc[1] if loc else None,
+                "lng": loc[0] if loc else None,
+                "fatigue_level": rider.get("fatigue_level", 0),
+                "speed_kmh": rider.get("speed_kmh", 0),
+                "helmet_connected": rider.get("helmet_connected", False),
+                "last_seen": last_seen.isoformat() if isinstance(last_seen, datetime) else None,
+            }
+        )
+
+    from app.routes.websocket_ops import broadcast_to_ops
+
+    await broadcast_to_ops(company_id, {"type": "fleet", "riders": fleet})

@@ -14,20 +14,41 @@ export const useOpsStore = create((set, get) => ({
   setStats: (stats) => set({ stats }),
   setWsConnected: (v) => set({ wsConnected: v }),
 
+  ws: null,
+
   connectWs() {
     const { companyId } = get()
-    const ws = new WebSocket(`ws://localhost:8000/ws/ops/${companyId}`)
-    ws.onopen = () => set({ wsConnected: true })
-    ws.onclose = () => {
-      set({ wsConnected: false })
-      setTimeout(() => get().connectWs(), 5000)
+    const baseDelayMs = 1000
+    const maxDelayMs = 30000
+    let attempt = 0
+
+    const connect = () => {
+      const ws = new WebSocket(`ws://localhost:8000/ws/ops/${companyId}`)
+      set({ ws })
+
+      ws.onopen = () => {
+        attempt = 0
+        set({ wsConnected: true })
+      }
+      ws.onclose = () => {
+        set({ wsConnected: false })
+        const delay = Math.min(baseDelayMs * (2 ** attempt), maxDelayMs)
+        attempt += 1
+        setTimeout(connect, delay)
+      }
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'fleet') set({ riders: msg.riders || [] })
+        if (msg.type === 'new_hazard') {
+          const payload = msg.payload || msg
+          set((s) => ({ hazards: [payload, ...s.hazards].slice(0, 200) }))
+        }
+        if (msg.type === 'alert_stream') get().addAlert(msg)
+        if (msg.type === 'peer_alert') get().addAlert(msg)
+      }
     }
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data)
-      if (msg.type === 'fleet') set({ riders: msg.riders })
-      if (msg.type === 'new_hazard') set((s) => ({ hazards: [msg, ...s.hazards].slice(0, 200) }))
-      if (msg.type === 'alert_stream') get().addAlert(msg)
-    }
+
+    connect()
   },
 
   async fetchInitial() {

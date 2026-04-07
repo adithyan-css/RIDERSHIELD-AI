@@ -1,40 +1,48 @@
 import 'dart:async';
+
 import 'package:geolocator/geolocator.dart';
-import 'api_service.dart';
-import 'ws_service.dart';
 
 class LocationService {
-  StreamSubscription<Position>? _sub;
-  Position? lastPosition;
+  StreamSubscription<Position>? _positionStream;
+  final StreamController<Position> _locationController =
+      StreamController<Position>.broadcast();
+
+  Stream<Position> get locationStream => _locationController.stream;
 
   Future<bool> requestPermission() async {
-    LocationPermission perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
     }
-    return perm == LocationPermission.always ||
-        perm == LocationPermission.whileInUse;
+    return permission != LocationPermission.deniedForever &&
+        permission != LocationPermission.denied;
+  }
+
+  Future<Position> getCurrentPosition() async {
+    return Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
   }
 
   void startTracking() {
-    _sub = Geolocator.getPositionStream(
+    _positionStream?.cancel();
+    _positionStream = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
-    ).listen((pos) {
-      lastPosition = pos;
-      wsService.sendLocation(pos.latitude, pos.longitude);
-      // Fire and forget HTTP update every ~5s handled by distance filter
-      ApiService.updateLocation(
-          pos.latitude, pos.longitude, pos.speed * 3.6);
+    ).listen((position) {
+      _locationController.add(position);
     });
   }
 
   void stopTracking() {
-    _sub?.cancel();
-    _sub = null;
+    _positionStream?.cancel();
+    _positionStream = null;
+  }
+
+  void dispose() {
+    stopTracking();
+    _locationController.close();
   }
 }
-
-final locationService = LocationService();

@@ -1,153 +1,171 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/rider_provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class LoginScreen extends StatefulWidget {
+import '../providers/auth_provider.dart';
+import 'main_navigation_screen.dart';
+
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  final _phoneCtrl = TextEditingController();
-  final _otpCtrl = TextEditingController();
-  final _nameCtrl = TextEditingController();
-  final _companyCtrl = TextEditingController(text: 'demo_company');
-  bool _isRegister = false;
-  bool _loading = false;
-  String? _error;
+class _LoginScreenState extends ConsumerState<LoginScreen> {
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    if (_phoneController.text.isEmpty || _passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter phone and password')),
+      );
+      return;
+    }
+
+    await ref.read(authProvider.notifier).login(
+          _phoneController.text,
+          _passwordController.text,
+        );
+
+    final authState = ref.read(authProvider);
+    if (authState.isAuthenticated && mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final teal = const Color(0xFF00C8A0);
+    final authState = ref.watch(authProvider);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0F1E),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 48),
-              Row(children: [
-                Container(
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(
-                    color: teal.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.shield, color: teal, size: 26),
-                ),
-                const SizedBox(width: 12),
-                Text('RiderShield',
-                    style: TextStyle(
-                        color: teal,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.5)),
-              ]),
-              const SizedBox(height: 8),
-              Text(
-                _isRegister ? 'Create your rider account' : 'Welcome back, rider',
-                style: const TextStyle(color: Colors.white70, fontSize: 15),
-              ),
-              const SizedBox(height: 40),
-              if (_isRegister) ...[
-                _field(_nameCtrl, 'Full Name', Icons.person_outline),
-                const SizedBox(height: 16),
-                _field(_companyCtrl, 'Company ID', Icons.business_outlined),
-                const SizedBox(height: 16),
-              ],
-              _field(_phoneCtrl, 'Phone Number', Icons.phone_outlined,
-                  type: TextInputType.phone),
-              const SizedBox(height: 16),
-              _field(_otpCtrl, _isRegister ? 'Create PIN' : 'OTP / PIN',
-                  Icons.lock_outline,
-                  obscure: true),
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
-              ],
-              const SizedBox(height: 28),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: teal,
-                    foregroundColor: Colors.black,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  onPressed: _loading ? null : _submit,
-                  child: _loading
-                      ? const SizedBox(
-                          width: 22, height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                      : Text(_isRegister ? 'Register' : 'Login',
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                ),
-              ),
-              const SizedBox(height: 20),
-              GestureDetector(
-                onTap: () => setState(() {
-                  _isRegister = !_isRegister;
-                  _error = null;
-                }),
-                child: Center(
-                  child: Text(
-                    _isRegister
-                        ? 'Already have an account? Login'
-                        : "Don't have an account? Register",
-                    style: TextStyle(color: teal, fontSize: 13),
-                  ),
-                ),
-              ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Theme.of(context).colorScheme.primary.withOpacity(0.8),
+              Theme.of(context).colorScheme.surface,
             ],
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Spacer(flex: 2),
+                Icon(
+                  Icons.shield,
+                  size: 100,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'RiderShield AI',
+                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onPrimary,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Real-Time Safety Network',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color:
+                            Theme.of(context).colorScheme.onPrimary.withOpacity(0.8),
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const Spacer(flex: 1),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: _phoneController,
+                          keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(
+                            labelText: 'Phone Number',
+                            prefixIcon: Icon(Icons.phone),
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _passwordController,
+                          obscureText: _obscurePassword,
+                          decoration: InputDecoration(
+                            labelText: 'Password',
+                            prefixIcon: const Icon(Icons.lock),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
+                              onPressed: () => setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              }),
+                            ),
+                            border: const OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: authState.isLoading ? null : _login,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).colorScheme.primary,
+                              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                            ),
+                            child: authState.isLoading
+                                ? const CircularProgressIndicator()
+                                : const Text(
+                                    'LOGIN',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        if (authState.error != null) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            authState.error!,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const Spacer(flex: 2),
+              ],
+            ),
           ),
         ),
       ),
     );
-  }
-
-  Widget _field(TextEditingController ctrl, String hint, IconData icon,
-      {bool obscure = false, TextInputType type = TextInputType.text}) {
-    return TextField(
-      controller: ctrl,
-      obscureText: obscure,
-      keyboardType: type,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: Colors.white38),
-        prefixIcon: Icon(icon, color: Colors.white38, size: 20),
-        filled: true,
-        fillColor: const Color(0xFF131C33),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF00C8A0), width: 1.5),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _submit() async {
-    setState(() { _loading = true; _error = null; });
-    try {
-      final rider = context.read<RiderProvider>();
-      if (_isRegister) {
-        await rider.register(_nameCtrl.text.trim(), _phoneCtrl.text.trim(), _companyCtrl.text.trim());
-      } else {
-        await rider.login(_phoneCtrl.text.trim(), _otpCtrl.text.trim());
-      }
-    } catch (e) {
-      setState(() => _error = 'Login failed. Check credentials or server.');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
   }
 }

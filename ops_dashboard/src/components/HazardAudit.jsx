@@ -37,7 +37,7 @@ const s = {
 
 export default function HazardAudit() {
   const { hazards, alerts } = useOpsStore()
-  const all = [...hazards].sort((a, b) => new Date(b.ts) - new Date(a.ts))
+  const all = [...hazards].sort((a, b) => new Date(b.timestamp || b.ts || 0) - new Date(a.timestamp || a.ts || 0))
 
   return (
     <div style={s.wrap}>
@@ -57,11 +57,11 @@ export default function HazardAudit() {
           {all.map((h, i) => (
             <tr key={i} style={{ background: i % 2 === 0 ? '#0D152640' : 'transparent' }}>
               <td style={s.td}>
-                <span style={s.badge(h.hazard_class)}>{h.hazard_class}</span>
+                <span style={s.badge(h.hazard_type || h.hazard_class)}>{h.hazard_type || h.hazard_class}</span>
               </td>
               <td style={s.td}>
                 <span style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                  {h.lat?.toFixed(4)}, {h.lng?.toFixed(4)}
+                  {(h.location?.coordinates?.[1] ?? h.lat)?.toFixed?.(4)}, {(h.location?.coordinates?.[0] ?? h.lng)?.toFixed?.(4)}
                 </span>
               </td>
               <td style={s.td}>{((h.confidence || 0) * 100).toFixed(0)}%</td>
@@ -73,7 +73,7 @@ export default function HazardAudit() {
                 <span style={s.verified(h.verified)}>{h.verified ? '✓ Verified' : '⏳ Pending'}</span>
               </td>
               <td style={{ ...s.td, color: '#ffffff50', fontSize: 11 }}>
-                {h.ts ? new Date(h.ts).toLocaleTimeString() : '—'}
+                {(h.timestamp || h.ts) ? new Date(h.timestamp || h.ts).toLocaleTimeString() : '—'}
               </td>
             </tr>
           ))}

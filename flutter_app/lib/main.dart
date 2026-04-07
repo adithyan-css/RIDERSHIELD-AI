@@ -1,72 +1,45 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'providers/rider_provider.dart';
-import 'providers/hazard_provider.dart';
-import 'providers/ble_provider.dart';
-import 'screens/main_shell.dart';
+import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
+import 'screens/main_navigation_screen.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const RiderShieldApp());
+  runApp(
+    const ProviderScope(
+      child: RiderShieldApp(),
+    ),
+  );
 }
 
-class RiderShieldApp extends StatelessWidget {
+class RiderShieldApp extends ConsumerWidget {
   const RiderShieldApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => RiderProvider()),
-        ChangeNotifierProvider(create: (_) => HazardProvider()),
-        ChangeNotifierProvider(create: (_) => BleProvider()),
-      ],
-      child: MaterialApp(
-        title: 'RiderShield',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF00C8A0),
-            brightness: Brightness.dark,
-          ),
-          scaffoldBackgroundColor: const Color(0xFF0A0F1E),
-          useMaterial3: true,
-          fontFamily: 'Inter',
+  Widget build(BuildContext context, WidgetRef ref) {
+    final authState = ref.watch(authProvider);
+
+    return MaterialApp(
+      title: 'RiderShield AI',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF2563EB),
+          brightness: Brightness.dark,
         ),
-        home: const AuthGate(),
+        useMaterial3: true,
+        // CardThemeData is required on current Flutter SDKs.
+        cardTheme: CardThemeData(
+          elevation: 8,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
       ),
-    );
-  }
-}
-
-class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
-
-  @override
-  State<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<AuthGate> {
-  @override
-  void initState() {
-    super.initState();
-    _checkLogin();
-  }
-
-  Future<void> _checkLogin() async {
-    final rider = context.read<RiderProvider>();
-    await rider.loadFromStorage();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<RiderProvider>(
-      builder: (context, rider, _) {
-        if (rider.isLoggedIn) return const MainShell();
-        return const LoginScreen();
-      },
+      home: authState.isAuthenticated
+          ? const MainNavigationScreen()
+          : const LoginScreen(),
     );
   }
 }

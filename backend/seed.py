@@ -18,13 +18,30 @@ async def seed():
         for i, rid in enumerate(RIDERS):
             try:
                 res = await client.post(f"{BASE_URL}/rider/register", json={
+                    "rider_id": rid,
                     "name": f"Demo Rider {i+1}",
                     "phone": f"+9198765432{i:02d}",
-                    "company_id": "demo_company"
+                    "company_id": "demo_company",
+                    "password": "demo1234",
                 })
                 print(f"Registered {rid}: {res.status_code}")
             except Exception as e:
                 print(f"Register failed: {e}")
+
+        offsets = [(0, 0), (0.00010, 0.00010), (0.00020, 0.00005)]
+        for rider_id, (d_lat, d_lng) in zip(RIDERS, offsets):
+            hfv = {
+                "rider_id": rider_id,
+                "lat": CENTER_LAT + d_lat,
+                "lng": CENTER_LNG + d_lng,
+                "depth_cm": 15.0,
+                "rain_raw": 450,
+                "accel_rms": 2.2,
+                "hazard_type": "flood",
+                "confidence": 0.95,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            await client.post(f"{BASE_URL}/hfv", json=hfv)
 
         # Inject 30 HFVs spread around center
         hfvs_sent = 0
@@ -42,7 +59,7 @@ async def seed():
                 "depth_cm": random.uniform(0, 25) if hazard_class == "flood" else random.uniform(0, 2),
                 "rain_raw": random.randint(0, 500) if hazard_class in ["flood", "rough"] else random.randint(700, 1023),
                 "accel_rms": random.uniform(1.5, 3.5) if hazard_class != "safe" else random.uniform(0.8, 1.2),
-                "hazard_class": hazard_class,
+                "hazard_type": hazard_class,
                 "confidence": random.uniform(0.7, 0.98),
                 "ts": (datetime.now(timezone.utc) - timedelta(minutes=random.randint(0, 60))).isoformat()
             }

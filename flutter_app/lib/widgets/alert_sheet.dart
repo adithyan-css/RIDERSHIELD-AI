@@ -4,8 +4,11 @@ class AlertSheet extends StatelessWidget {
   final Map<String, dynamic> alert;
   const AlertSheet({super.key, required this.alert});
 
+  String get _hazardType =>
+      (alert['hazard_type'] ?? alert['hazard_class'] ?? 'hazard').toString();
+
   Color get _color {
-    switch (alert['hazard_class']) {
+    switch (_hazardType) {
       case 'flood': return const Color(0xFF3B8BD4);
       case 'pothole': return const Color(0xFFFF6B35);
       case 'rough': return const Color(0xFFFFB347);
@@ -14,7 +17,7 @@ class AlertSheet extends StatelessWidget {
   }
 
   IconData get _icon {
-    switch (alert['hazard_class']) {
+    switch (_hazardType) {
       case 'flood': return Icons.water;
       case 'pothole': return Icons.report_problem;
       case 'rough': return Icons.terrain;
@@ -42,7 +45,7 @@ class AlertSheet extends StatelessWidget {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(
-              '⚠️ ${alert['hazard_class']?.toString().toUpperCase() ?? 'HAZARD'} AHEAD',
+              '⚠️ ${_hazardType.toUpperCase()} AHEAD',
               style: TextStyle(color: _color, fontWeight: FontWeight.w700, fontSize: 13),
             ),
             Text(

@@ -31,7 +31,7 @@ export default function FleetMap() {
 
         {/* Rider dots */}
         {riders.map((r) => {
-          const loc = r.current_location?.coordinates
+          const loc = r.location?.coordinates || r.current_location?.coordinates
           if (!loc) return null
           const [lng, lat] = loc
           const color = FATIGUE_COLORS[r.fatigue_level] || '#00C8A0'
@@ -52,14 +52,18 @@ export default function FleetMap() {
 
         {/* Hazard markers */}
         {hazards.map((h, i) => {
-          const color = HAZARD_COLORS[h.hazard_class] || '#ffffff'
+          const cls = h.hazard_type || h.hazard_class || 'unknown'
+          const coords = h.location?.coordinates || [h.lng, h.lat]
+          const [lng, lat] = coords
+          if (typeof lat !== 'number' || typeof lng !== 'number') return null
+          const color = HAZARD_COLORS[cls] || '#ffffff'
           return (
-            <CircleMarker key={i} center={[h.lat, h.lng]} radius={6}
+            <CircleMarker key={i} center={[lat, lng]} radius={6}
               pathOptions={{ color, fillColor: color, fillOpacity: 0.7, weight: 1 }}>
               <Popup>
                 <div style={{ fontSize: 13 }}>
-                  <strong>{h.hazard_class}</strong><br />
-                  Confidence: {(h.confidence * 100).toFixed(0)}%<br />
+                  <strong>{cls}</strong><br />
+                  Confidence: {((h.confidence || h.proof_score || 0) * 100).toFixed(0)}%<br />
                   {h.verified ? '✅ Verified' : '⏳ Pending'}
                 </div>
               </Popup>

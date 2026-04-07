@@ -1,145 +1,132 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 
+import '../models/delivery_model.dart';
+import '../models/hazard_model.dart';
+import '../models/rider_model.dart';
+
 class ApiService {
-  static const String baseUrl = 'http://10.0.2.2:8000/api'; // Android emulator
-  // static const String baseUrl = 'http://localhost:8000/api'; // iOS simulator
+  static const String baseUrl = 'http://127.0.0.1:8000/api';
+  static const Duration timeout = Duration(seconds: 10);
 
-  static String? _token;
-  static String? _riderId;
+  String? _authToken;
 
-  static void setAuth(String token, String riderId) {
-    _token = token;
-    _riderId = riderId;
+  void setToken(String token) {
+    _authToken = token;
   }
 
-  static Map<String, String> get _headers => {
+  void clearToken() {
+    _authToken = null;
+  }
+
+  Map<String, String> get _headers => {
         'Content-Type': 'application/json',
-        if (_token != null) 'Authorization': 'Bearer $_token',
+        if (_authToken != null) 'Authorization': 'Bearer $_authToken',
       };
 
-  // --- Auth ---
-  static Future<Map<String, dynamic>> register(
-      String name, String phone, String companyId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/rider/register'),
-      headers: _headers,
-      body: jsonEncode({'name': name, 'phone': phone, 'company_id': companyId}),
-    );
-    return jsonDecode(res.body);
-  }
-
-  static Future<Map<String, dynamic>> login(String phone, String otp) async {
-    final res = await http.post(
+  Future<Rider> login(String phone, String password) async {
+    final response = await http.post(
       Uri.parse('$baseUrl/rider/login'),
-      headers: _headers,
-      body: jsonEncode({'phone': phone, 'otp': otp}),
-    );
-    return jsonDecode(res.body);
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'phone': phone,
+        'password': password,
+      }),
+    ).timeout(timeout);
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return Rider.fromJson(data);
+    } else {
+      throw Exception('Login failed: ${response.body}');
+    }
   }
 
-  // --- Location ---
-  static Future<void> updateLocation(
-      double lat, double lng, double speedKmh) async {
+  Future<List<Hazard>> getHazards() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/hazards/verified'),
+      headers: _headers,
+    ).timeout(timeout);
+
+    if (response.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(response.body);
+      return data.map((e) => Hazard.fromJson(e)).toList();
+    } else {
+      throw Exception('Failed to fetch hazards');
+    }
+  }
+
+  Future<void> updateLocation(
+      String riderId, double lat, double lng, double speed) async {
     await http.post(
       Uri.parse('$baseUrl/rider/location'),
       headers: _headers,
       body: jsonEncode({
-        'rider_id': _riderId,
+        'rider_id': riderId,
         'lat': lat,
         'lng': lng,
-        'speed_kmh': speedKmh,
+        'speed': speed,
+        'timestamp': DateTime.now().toIso8601String(),
       }),
-    );
+    ).timeout(timeout);
   }
 
-  // --- HFV ---
-  static Future<void> submitHFV(Map<String, dynamic> hfv) async {
-    await http.post(
-      Uri.parse('$baseUrl/hfv'),
+  Future<Map<String, dynamic>> resolveDigipin(String digiPin) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/digipin/resolve?pin=$digiPin'),
       headers: _headers,
-      body: jsonEncode(hfv),
-    );
+    ).timeout(timeout);
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Invalid DIGIPIN');
+    }
   }
 
-  // --- Hazard surface ---
-  static Future<Map<String, dynamic>> getGPSurface(
-      double lat, double lng) async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/hazards/surface?lat=$lat&lng=$lng&radius_m=500'),
-      headers: _headers,
-    );
-    return jsonDecode(res.body);
-  }
-
-  static Future<List<dynamic>> getVerifiedHazards(
-      double lat, double lng) async {
-    final res = await http.get(
-      Uri.parse(
-          '$baseUrl/hazards/verified?lat=$lat&lng=$lng&radius_m=1000&limit=20'),
-      headers: _headers,
-    );
-    return jsonDecode(res.body);
-  }
-
-  // --- DIGIPIN ---
-  static Future<Map<String, dynamic>> resolveDigipin(String code) async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/digipin/resolve?code=$code'),
-      headers: _headers,
-    );
-    return jsonDecode(res.body);
-  }
-
-  static Future<Map<String, dynamic>> encodeDigipin(
-      double lat, double lng) async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/digipin/encode?lat=$lat&lng=$lng'),
-      headers: _headers,
-    );
-    return jsonDecode(res.body);
-  }
-
-  // --- Delivery ---
-  static Future<Map<String, dynamic>> startDelivery(
-      String orderId, String digipin, String pickupDigipin) async {
-    final res = await http.post(
+  Future<Delivery> startDelivery(String deliveryId) async {
+    final response = await http.post(
       Uri.parse('$baseUrl/delivery/start'),
       headers: _headers,
       body: jsonEncode({
-        'order_id': orderId,
-        'rider_id': _riderId,
-        'digipin': digipin,
-        'pickup_digipin': pickupDigipin,
+        'delivery_id': deliveryId,
       }),
-    );
-    return jsonDecode(res.body);
+    ).timeout(timeout);
+
+    if (response.statusCode == 200) {
+      return Delivery.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Failed to start delivery');
+    }
   }
 
-  static Future<Map<String, dynamic>> verifyDelivery(
-      String deliveryId, bool gpsMatch, String? clipId) async {
-    final res = await http.patch(
+  Future<Delivery> verifyDelivery(String deliveryId, String digiPin) async {
+    final response = await http.patch(
       Uri.parse('$baseUrl/delivery/$deliveryId/verify'),
       headers: _headers,
-      body: jsonEncode({'gps_match': gpsMatch, 'clip_id': clipId}),
-    );
-    return jsonDecode(res.body);
+      body: jsonEncode({
+        'digi_pin': digiPin,
+      }),
+    ).timeout(timeout);
+
+    if (response.statusCode == 200) {
+      return Delivery.fromJson(jsonDecode(response.body));
+    } else {
+      throw Exception('Verification failed');
+    }
   }
 
-  // --- Rider state ---
-  static Future<Map<String, dynamic>> getRiderState() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/rider/$_riderId/state'),
+  Future<Map<String, dynamic>> getRiderProfile(String riderId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/rider/$riderId'),
       headers: _headers,
-    );
-    return jsonDecode(res.body);
-  }
+    ).timeout(timeout);
 
-  static Future<Map<String, dynamic>> getRiderHistory() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/rider/$_riderId/history'),
-      headers: _headers,
-    );
-    return jsonDecode(res.body);
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to load profile');
+    }
   }
 }

@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.redis_client import enqueue_hfv_id
 from app.db.mongo import get_mongo_db
 from app.models.hazard import HFVIn
+from app.services.broadcast_service import broadcast_hazard
 from app.services.proof_service import check_verification
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,9 @@ async def process_hfv(payload: dict[str, Any], source: str = "api") -> dict[str,
     db = get_mongo_db()
     insert_result = await db.hazards.insert_one(doc)
     hazard_id = str(insert_result.inserted_id)
+
+    if hazard_type != "safe":
+        await broadcast_hazard(doc)
 
     await enqueue_hfv_id(geohash, hazard_id)
 

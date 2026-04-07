@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
-import 'home_screen.dart';
-import 'ride_screen.dart';
+
 import 'delivery_screen.dart';
 import 'helmet_screen.dart';
+import 'home_screen.dart';
 import 'profile_screen.dart';
+import 'ride_screen.dart';
 
-class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+class MainNavigationScreen extends StatefulWidget {
+  const MainNavigationScreen({super.key});
 
   @override
-  State<MainShell> createState() => _MainShellState();
+  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
   final _screens = const [
@@ -31,9 +32,8 @@ class _MainShellState extends State<MainShell> {
         children: _screens,
       ),
       bottomNavigationBar: NavigationBar(
-        backgroundColor: const Color(0xFF0D1526),
         selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
+        onDestinationSelected: (index) => setState(() => _currentIndex = index),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.map_outlined),
@@ -41,18 +41,18 @@ class _MainShellState extends State<MainShell> {
             label: 'Map',
           ),
           NavigationDestination(
-            icon: Icon(Icons.speed_outlined),
-            selectedIcon: Icon(Icons.speed),
+            icon: Icon(Icons.two_wheeler_outlined),
+            selectedIcon: Icon(Icons.two_wheeler),
             label: 'Ride',
           ),
           NavigationDestination(
-            icon: Icon(Icons.local_shipping_outlined),
-            selectedIcon: Icon(Icons.local_shipping),
+            icon: Icon(Icons.delivery_dining_outlined),
+            selectedIcon: Icon(Icons.delivery_dining),
             label: 'Delivery',
           ),
           NavigationDestination(
-            icon: Icon(Icons.sports_motorsports_outlined),
-            selectedIcon: Icon(Icons.sports_motorsports),
+            icon: Icon(Icons.headset_outlined),
+            selectedIcon: Icon(Icons.headset),
             label: 'Helmet',
           ),
           NavigationDestination(
