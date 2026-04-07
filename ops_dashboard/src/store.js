@@ -62,7 +62,7 @@ export const useOpsStore = create((set, get) => ({
           }
           get().addAlert(normalizedAlert)
 
-          const hazardTypes = new Set(['hazard', 'road_hazard', 'collision_risk'])
+          const hazardTypes = new Set(['hazard', 'hazard_detected', 'road_hazard', 'collision_risk'])
           if (hazardTypes.has(payload.event_type)) {
             const normalizedHazard = {
               hazard_type: metadata.hazard_type || metadata.hazard_class || payload.event_type,

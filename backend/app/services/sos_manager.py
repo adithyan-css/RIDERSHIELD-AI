@@ -9,6 +9,7 @@ SOS_EVENT_TYPES = {
     "sos",
     "sos_trigger",
     "accident",
+    "accident_detected",
     "crash",
     "impact",
     "fall_detected",

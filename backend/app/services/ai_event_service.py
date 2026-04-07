@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import logging
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _HAZARD_EVENT_TYPES = {
     "hazard",
+    "hazard_detected",
     "road_hazard",
     "collision_risk",
     "pothole",
@@ -27,6 +29,10 @@ _HAZARD_EVENT_TYPES = {
 
 class AIEventService:
     """Validates, stores, and dispatches AI events into backend workflows."""
+
+    def __init__(self) -> None:
+        self._recent_events: deque[dict[str, Any]] = deque(maxlen=300)
+        self._recent_lock = asyncio.Lock()
 
     async def process_event(self, payload: dict[str, Any], source: str = "api") -> dict[str, Any]:
         event = AIEventIn.model_validate(payload)
@@ -159,8 +165,73 @@ class AIEventService:
             "source": event["source"],
         }
 
-        await broadcast_ai_event(payload)
-        await websocket_manager.send_to_rider(event["rider_id"], {"type": "AI_EVENT", "payload": payload})
+        results = await asyncio.gather(
+            broadcast_ai_event(payload),
+            websocket_manager.send_to_rider(event["rider_id"], {"type": "AI_EVENT", "payload": payload}),
+            return_exceptions=True,
+        )
+
+        broadcast_result, rider_result = results
+        broadcast_sent = broadcast_result if isinstance(broadcast_result, int) else 0
+        rider_sent = rider_result if isinstance(rider_result, bool) else False
+
+        if isinstance(broadcast_result, Exception) or isinstance(rider_result, Exception):
+            logger.error(
+                "AI event websocket broadcast failed rider_id=%s event_id=%s broadcast_error=%s rider_error=%s",
+                event["rider_id"],
+                event.get("metadata", {}).get("event_id"),
+                repr(broadcast_result) if isinstance(broadcast_result, Exception) else None,
+                repr(rider_result) if isinstance(rider_result, Exception) else None,
+            )
+            await self._store_recent_event(
+                payload,
+                reason="exception",
+                broadcast_sent=broadcast_sent,
+                rider_sent=rider_sent,
+            )
+            return
+
+        if broadcast_sent == 0 and not rider_sent:
+            logger.warning(
+                "AI event stored for fallback (no websocket consumers) rider_id=%s event_id=%s",
+                event["rider_id"],
+                event.get("metadata", {}).get("event_id"),
+            )
+            await self._store_recent_event(
+                payload,
+                reason="no_consumers",
+                broadcast_sent=broadcast_sent,
+                rider_sent=rider_sent,
+            )
+
+    async def _store_recent_event(
+        self,
+        payload: dict[str, Any],
+        *,
+        reason: str,
+        broadcast_sent: int,
+        rider_sent: bool,
+    ) -> None:
+        record = {
+            **payload,
+            "fallback_reason": reason,
+            "fallback_at": datetime.now(timezone.utc).isoformat(),
+            "broadcast_sent": broadcast_sent,
+            "rider_sent": rider_sent,
+        }
+        async with self._recent_lock:
+            self._recent_events.appendleft(record)
+
+    async def get_recent_events(self, limit: int = 50, rider_id: str | None = None) -> list[dict[str, Any]]:
+        capped_limit = max(1, min(limit, 200))
+        async with self._recent_lock:
+            snapshot = list(self._recent_events)
+
+        if isinstance(rider_id, str) and rider_id.strip():
+            needle = rider_id.strip()
+            snapshot = [item for item in snapshot if item.get("rider_id") == needle]
+
+        return snapshot[:capped_limit]
 
 
 ai_event_service = AIEventService()
@@ -168,3 +239,7 @@ ai_event_service = AIEventService()
 
 async def process_ai_event(payload: dict[str, Any], source: str = "api") -> dict[str, Any]:
     return await ai_event_service.process_event(payload, source=source)
+
+
+async def get_recent_ai_events(limit: int = 50, rider_id: str | None = None) -> list[dict[str, Any]]:
+    return await ai_event_service.get_recent_events(limit=limit, rider_id=rider_id)

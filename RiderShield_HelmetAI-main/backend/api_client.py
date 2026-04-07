@@ -1,13 +1,18 @@
 import asyncio
 import json
+import logging
 import os
 import random
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict
 from urllib import error, request
 
 import paho.mqtt.publish as mqtt_publish
+
+
+logger = logging.getLogger(__name__)
 
 
 class BackendAPIClient:
@@ -59,36 +64,48 @@ class BackendAPIClient:
 
     def _send_with_retry(self, payload: Dict[str, Any]) -> bool:
         delay_s = self.backoff_base_s
+        event_id = str((payload.get("metadata") or {}).get("event_id", "unknown"))
         for attempt in range(1, self.max_attempts + 1):
+            logger.info("ai_send_attempt event_id=%s attempt=%s", event_id, attempt)
             if self._simulate_failure():
                 ok = False
             else:
                 ok = self._send_once(payload)
 
             if ok:
+                logger.info("ai_send_success event_id=%s attempt=%s", event_id, attempt)
                 return True
+
+            logger.warning("ai_send_retry event_id=%s attempt=%s", event_id, attempt)
 
             if attempt < self.max_attempts:
                 time.sleep(delay_s)
                 delay_s *= 2
 
+        logger.error("ai_send_failed event_id=%s attempts=%s", event_id, self.max_attempts)
         return False
 
     async def _send_with_retry_async(self, payload: Dict[str, Any]) -> bool:
         delay_s = self.backoff_base_s
+        event_id = str((payload.get("metadata") or {}).get("event_id", "unknown"))
         for attempt in range(1, self.max_attempts + 1):
+            logger.info("ai_send_attempt_async event_id=%s attempt=%s", event_id, attempt)
             if self._simulate_failure():
                 ok = False
             else:
                 ok = await asyncio.to_thread(self._send_once, payload)
 
             if ok:
+                logger.info("ai_send_success_async event_id=%s attempt=%s", event_id, attempt)
                 return True
+
+            logger.warning("ai_send_retry_async event_id=%s attempt=%s", event_id, attempt)
 
             if attempt < self.max_attempts:
                 await asyncio.sleep(delay_s)
                 delay_s *= 2
 
+        logger.error("ai_send_failed_async event_id=%s attempts=%s", event_id, self.max_attempts)
         return False
 
     def _send_once(self, payload: Dict[str, Any]) -> bool:
@@ -98,6 +115,7 @@ class BackendAPIClient:
         return self._publish_event_mqtt(payload)
 
     def _post_event_http(self, payload: Dict[str, Any]) -> bool:
+        event_id = str((payload.get("metadata") or {}).get("event_id", "unknown"))
         body = json.dumps(payload).encode("utf-8")
         req = request.Request(
             self.ai_event_endpoint,
@@ -113,13 +131,14 @@ class BackendAPIClient:
             with request.urlopen(req, timeout=self.timeout_s) as resp:
                 return 200 <= int(resp.getcode()) < 300
         except error.HTTPError as exc:
-            print(f"HTTP send failed status={exc.code}")
+            logger.warning("ai_http_failed event_id=%s status=%s", event_id, exc.code)
             return False
         except Exception as exc:
-            print(f"HTTP send failed error={exc}")
+            logger.exception("ai_http_failed event_id=%s error=%s", event_id, exc)
             return False
 
     def _publish_event_mqtt(self, payload: Dict[str, Any]) -> bool:
+        event_id = str((payload.get("metadata") or {}).get("event_id", "unknown"))
         try:
             mqtt_publish.single(
                 topic=self.mqtt_topic,
@@ -131,7 +150,7 @@ class BackendAPIClient:
             )
             return True
         except Exception as exc:
-            print(f"MQTT publish failed error={exc}")
+            logger.exception("ai_mqtt_failed event_id=%s error=%s", event_id, exc)
             return False
 
     def _simulate_failure(self) -> bool:
@@ -181,17 +200,24 @@ class BackendAPIClient:
         timestamp = event.get("timestamp")
         timestamp_iso = BackendAPIClient._to_iso_timestamp(timestamp)
 
+        metadata_input = event.get("metadata") or {}
+        generated_event_id = (
+            str(event.get("event_id") or metadata_input.get("event_id") or "").strip() or str(uuid.uuid4())
+        )
+
         metadata = {
             "channel": channel,
-            "event_id": event.get("event_id"),
+            "event_id": generated_event_id,
             "digipin": event.get("digipin"),
             "video_path": event.get("video_path"),
             "signals": event.get("signals", {}),
             "source": event.get("source", "helmet_ai"),
         }
 
-        for key, value in (event.get("metadata") or {}).items():
+        for key, value in metadata_input.items():
             metadata[key] = value
+
+        metadata["event_id"] = generated_event_id
 
         return {
             "rider_id": str(event.get("rider_id", "unknown_rider")),

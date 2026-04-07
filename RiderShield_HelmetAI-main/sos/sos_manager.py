@@ -1,7 +1,11 @@
+import logging
 from typing import Dict
 
 from backend.api_client import BackendAPIClient
 from backend.retry_manager import RetryManager
+
+
+logger = logging.getLogger(__name__)
 
 
 class SOSManager:
@@ -27,12 +31,13 @@ class SOSManager:
     def handle_incident_event(self, event: Dict) -> None:
         outbound = self._with_channels(event)
         ok = self.api_client.send_event_to_company(outbound)
+        event_id = str((outbound.get("metadata") or {}).get("event_id") or outbound.get("event_id") or "unknown")
 
         if ok:
-            print("Event sent successfully")
+            logger.info("sos_send_success event_id=%s", event_id)
             return
 
-        print("Event send failed, enqueued for retry")
+        logger.warning("sos_send_failed_enqueued event_id=%s", event_id)
         self.retry_manager.enqueue(outbound)
 
     def shutdown(self) -> None:

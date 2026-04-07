@@ -13,7 +13,7 @@ def build_incident_event(
     timestamp = datetime.fromtimestamp(float(metadata["timestamp"]), tz=timezone.utc).isoformat()
     return {
         "event_id": str(uuid.uuid4()),
-        "event_type": "ACCIDENT",
+        "event_type": "accident_detected",
         "timestamp": timestamp,
         "gps": metadata["gps"],
         "digipin": metadata["digipin"],

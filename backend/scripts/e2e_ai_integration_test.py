@@ -71,6 +71,17 @@ async def _assert_db_events(event_ids: list[str]) -> None:
         client.close()
 
 
+async def _assert_single_record(event_id: str) -> None:
+    client = AsyncIOMotorClient(MONGO_URI)
+    db = client[MONGO_DB]
+    try:
+        count = await db.ai_events.count_documents({"metadata.event_id": event_id})
+        if count != 1:
+            raise AssertionError(f"Expected 1 record for event_id={event_id}, found {count}")
+    finally:
+        client.close()
+
+
 async def main() -> None:
     rider_id = "e2e_rider"
     http_event = _make_event("hazard", rider_id)
@@ -90,6 +101,13 @@ async def main() -> None:
         )
         response.raise_for_status()
 
+        duplicate_response = await client.post(
+            f"{API_BASE}/api/ai/event",
+            headers={"x-api-key": API_KEY},
+            json=http_event,
+        )
+        duplicate_response.raise_for_status()
+
     mqtt_publish.single(
         topic=MQTT_TOPIC,
         payload=json.dumps(mqtt_event),
@@ -104,6 +122,7 @@ async def main() -> None:
         raise AssertionError("Expected 2 AI_EVENT websocket messages")
 
     await _assert_db_events(list(expected_ids))
+    await _assert_single_record(http_event["metadata"]["event_id"])
     print("E2E PASS: HTTP+MQTT ingestion, DB persistence, and websocket broadcast verified")
 
 

@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import queue
 import threading
@@ -24,6 +25,9 @@ from sos.metadata import MetadataProvider
 from sos.sos_manager import SOSManager
 from tracker import SimpleCentroidTracker
 from utils import draw_collision_warning, draw_fps, draw_tracks, draw_zones, zone_for_centroid
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -92,7 +96,7 @@ class IncidentProcessor:
                     pre_seconds=10.0,
                     post_seconds=10.0,
                 )
-                print("Clip extracted:", clip_path)
+                logger.info("incident_clip_extracted path=%s", clip_path)
 
                 metadata = self.metadata_provider.build_metadata()
                 event = build_incident_event(
@@ -104,7 +108,7 @@ class IncidentProcessor:
                 )
                 self.sos_manager.handle_incident_event(event)
             except Exception as exc:
-                print("Incident processing failed:", exc)
+                logger.exception("incident_processing_failed error=%s", exc)
 
 
 def parse_args() -> argparse.Namespace:
@@ -182,6 +186,11 @@ def _build_stream_event(
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+
     args = parse_args()
 
     app = AppInterface()
@@ -244,10 +253,10 @@ def main() -> None:
 
             if active and not recorder.is_running():
                 recorder.start()
-                print("Camera activated: rider on delivery")
+                logger.info("camera_activated rider_on_delivery=true")
             if not active and recorder.is_running():
                 recorder.stop()
-                print("Camera deactivated: rider not on delivery")
+                logger.info("camera_deactivated rider_on_delivery=false")
 
             frame = np.zeros((540, 960, 3), dtype=np.uint8)
             confidence = 0.0
@@ -278,7 +287,7 @@ def main() -> None:
                     sm_output_state = state_out.state
 
                     if state_out.confirmed:
-                        print(f"Accident detected (confidence: {confidence:.2f})")
+                        logger.info("accident_detected confidence=%.4f", confidence)
                         incident_processor.submit(
                             IncidentJob(
                                 event_ts=ts,
@@ -292,7 +301,7 @@ def main() -> None:
                     if ttc_score >= 0.45 and stream_throttler.should_emit(
                         "collision_risk",
                         ts,
-                        cooldown_s=4.0,
+                        cooldown_s=1.0,
                     ):
                         collision_event = _build_stream_event(
                             rider_id=app.get_rider_id(),
@@ -306,16 +315,21 @@ def main() -> None:
                                 "signals": fusion_out["signals"],
                             },
                         )
-                        api_client.send_event_to_company(collision_event)
+                        sent = api_client.send_event_to_company(collision_event)
+                        logger.info(
+                            "stream_event_sent type=collision_risk sent=%s event_id=%s",
+                            sent,
+                            collision_event.get("event_id"),
+                        )
 
                     if any(trk.get("alert_level") == "COLLISION" for trk in tracks) and stream_throttler.should_emit(
                         "road_hazard",
                         ts,
-                        cooldown_s=6.0,
+                        cooldown_s=1.0,
                     ):
                         hazard_event = _build_stream_event(
                             rider_id=app.get_rider_id(),
-                            event_type="hazard",
+                            event_type="hazard_detected",
                             confidence=max(confidence, 0.55),
                             metadata_provider=metadata_provider,
                             metadata_extra={
@@ -324,7 +338,12 @@ def main() -> None:
                                 "signals": fusion_out["signals"],
                             },
                         )
-                        api_client.send_event_to_company(hazard_event)
+                        sent = api_client.send_event_to_company(hazard_event)
+                        logger.info(
+                            "stream_event_sent type=hazard_detected sent=%s event_id=%s",
+                            sent,
+                            hazard_event.get("event_id"),
+                        )
 
             if show_ui:
                 draw_zones(frame)
@@ -348,19 +367,19 @@ def main() -> None:
                     break
                 if key == ord("l"):
                     app.simulate_login()
-                    print("Rider logged in")
+                    logger.info("rider_login_simulated")
                 if key == ord("o"):
                     app.simulate_logout()
-                    print("Rider logged out")
+                    logger.info("rider_logout_simulated")
                 if key == ord("d"):
                     app.simulate_delivery_start()
-                    print("Delivery started")
+                    logger.info("delivery_start_simulated")
                 if key == ord("s"):
                     app.simulate_delivery_stop()
-                    print("Delivery stopped")
+                    logger.info("delivery_stop_simulated")
                 if key == ord("x"):
                     fusion.inject_simulated_accident()
-                    print("Injected motion spike for accident simulation")
+                    logger.info("accident_spike_simulated")
             else:
                 time.sleep(0.01)
 
