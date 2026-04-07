@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 
 from app.db.mongo import get_mongo_db
 
@@ -18,7 +18,12 @@ def _serialize_doc(doc: dict) -> dict:
 
 
 @router.get("/ops/fleet")
-async def get_ops_fleet(company_id: str = Query(...)):
+async def get_ops_fleet(
+    response: Response,
+    company_id: str = Query(...),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+):
     db = get_mongo_db()
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
     query = {
@@ -28,15 +33,22 @@ async def get_ops_fleet(company_id: str = Query(...)):
             {"last_seen": {"$gte": cutoff}},
         ],
     }
-    docs = await db.riders.find(query).to_list(length=500)
+    skip = (page - 1) * limit
+    total = await db.riders.count_documents(query)
+    docs = await db.riders.find(query).sort("last_seen", -1).skip(skip).limit(limit).to_list(length=limit)
+
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Page"] = str(page)
+    response.headers["X-Limit"] = str(limit)
     return [_serialize_doc(doc) for doc in docs]
 
 
 @router.get("/ops/alerts")
 async def get_ops_alerts(
+    response: Response,
     company_id: str = Query(...),
-    limit: int = Query(50, ge=1, le=500),
-    skip: int = Query(0, ge=0),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
 ):
     db = get_mongo_db()
     query = {"company_id": company_id}
@@ -46,8 +58,14 @@ async def get_ops_alerts(
     if rider_ids:
         query = {"rider_id": {"$in": rider_ids}}
 
+    skip = (page - 1) * limit
+    total = await db.hazards.count_documents(query)
     cursor = db.hazards.find(query).sort("timestamp", -1).skip(skip).limit(limit)
     docs = await cursor.to_list(length=limit)
+
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Page"] = str(page)
+    response.headers["X-Limit"] = str(limit)
     return [_serialize_doc(doc) for doc in docs]
 
 

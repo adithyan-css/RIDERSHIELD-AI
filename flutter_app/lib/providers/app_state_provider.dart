@@ -32,6 +32,7 @@ class AppState {
   final List<Hazard> hazards;
   final List<Alert> alerts;
   final bool isWebSocketConnected;
+  final bool isFallbackMode;
   final double? currentSpeed;
   final bool isTracking;
 
@@ -40,6 +41,7 @@ class AppState {
     this.hazards = const [],
     this.alerts = const [],
     this.isWebSocketConnected = false,
+    this.isFallbackMode = false,
     this.currentSpeed,
     this.isTracking = false,
   });
@@ -49,6 +51,7 @@ class AppState {
     List<Hazard>? hazards,
     List<Alert>? alerts,
     bool? isWebSocketConnected,
+    bool? isFallbackMode,
     double? currentSpeed,
     bool? isTracking,
   }) {
@@ -57,6 +60,7 @@ class AppState {
       hazards: hazards ?? this.hazards,
       alerts: alerts ?? this.alerts,
       isWebSocketConnected: isWebSocketConnected ?? this.isWebSocketConnected,
+      isFallbackMode: isFallbackMode ?? this.isFallbackMode,
       currentSpeed: currentSpeed ?? this.currentSpeed,
       isTracking: isTracking ?? this.isTracking,
     );
@@ -70,8 +74,10 @@ class AppStateNotifier extends StateNotifier<AppState> {
   final ApiService _apiService;
   final Rider? _rider;
   Timer? _locationTimer;
+  Timer? _fallbackTimer;
   StreamSubscription<Position>? _locationSub;
   StreamSubscription<Alert>? _alertSub;
+  bool _isFallbackFetchInFlight = false;
 
   AppStateNotifier(
     this._wsService,
@@ -86,6 +92,7 @@ class AppStateNotifier extends StateNotifier<AppState> {
   void _init() {
     if (_rider != null) {
       _connectWebSocket();
+      _startFallbackPolling();
       _startLocationTracking();
       _loadHazards();
     }
@@ -98,20 +105,70 @@ class AppStateNotifier extends StateNotifier<AppState> {
     await _wsService.connect(rider.id);
 
     _wsService.addListener(() {
-      state = state.copyWith(isWebSocketConnected: _wsService.isConnected);
+      state = state.copyWith(
+        isWebSocketConnected: _wsService.isConnected,
+        isFallbackMode: !_wsService.isConnected,
+      );
     });
 
-    _alertSub = _wsService.alertStream.listen(_handleAlert);
+    _alertSub = _wsService.alertStream.listen(
+      _handleAlert,
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('Alert stream error: $error');
+      },
+    );
   }
 
   void _handleAlert(Alert alert) {
-    final newAlerts = [alert, ...state.alerts];
-    state = state.copyWith(alerts: newAlerts);
+    _ingestAlert(alert);
+  }
 
-    // Voice alert
-    _ttsService.alertHazard(alert.hazardType, '50');
+  void _ingestAlert(Alert alert) {
+    if (state.alerts.any((a) => a.id == alert.id)) {
+      return;
+    }
 
-    // Show notification (in real app, use flutter_local_notifications)
+    final nextAlerts = [alert, ...state.alerts];
+    state = state.copyWith(
+      alerts: nextAlerts.length > 80 ? nextAlerts.take(80).toList() : nextAlerts,
+    );
+
+    unawaited(_ttsService.alertHazard(alert.hazardType, message: alert.message));
+  }
+
+  void _startFallbackPolling() {
+    _fallbackTimer?.cancel();
+    _fallbackTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      unawaited(_recoverFromRealtimeGap());
+    });
+  }
+
+  Future<void> _recoverFromRealtimeGap() async {
+    final rider = _rider;
+    if (rider == null || _isFallbackFetchInFlight) {
+      return;
+    }
+
+    final shouldUseFallback = !_wsService.isConnected || _wsService.isStale;
+    if (!shouldUseFallback) {
+      if (state.isFallbackMode) {
+        state = state.copyWith(isFallbackMode: false);
+      }
+      return;
+    }
+
+    _isFallbackFetchInFlight = true;
+    state = state.copyWith(isFallbackMode: true);
+    try {
+      final recentEvents = await _apiService.getRecentAiEvents(riderId: rider.id, limit: 30);
+      for (final alert in recentEvents.reversed) {
+        _ingestAlert(alert);
+      }
+    } catch (e) {
+      debugPrint('Fallback recent-event fetch failed: $e');
+    } finally {
+      _isFallbackFetchInFlight = false;
+    }
   }
 
   Future<void> _startLocationTracking() async {
@@ -181,6 +238,7 @@ class AppStateNotifier extends StateNotifier<AppState> {
   @override
   void dispose() {
     _locationTimer?.cancel();
+    _fallbackTimer?.cancel();
     _locationSub?.cancel();
     _alertSub?.cancel();
     _locationService.dispose();

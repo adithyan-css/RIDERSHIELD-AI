@@ -1,13 +1,79 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 
 import '../providers/app_state_provider.dart';
+import '../providers/auth_provider.dart';
+import '../widgets/fatigue_gauge.dart';
 
-class RideScreen extends ConsumerWidget {
+class RideScreen extends ConsumerStatefulWidget {
   const RideScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<RideScreen> createState() => _RideScreenState();
+}
+
+class _RideScreenState extends ConsumerState<RideScreen> {
+  Timer? _pollTimer;
+  int _fatiguePct = 0;
+  bool _loadingFatigue = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshFatigue();
+    _pollTimer = Timer.periodic(const Duration(seconds: 6), (_) => _refreshFatigue());
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  int get _fatigueLevel {
+    if (_fatiguePct <= 25) return 1;
+    if (_fatiguePct <= 50) return 2;
+    if (_fatiguePct <= 75) return 3;
+    return 4;
+  }
+
+  Color get _fatigueColor {
+    if (_fatiguePct <= 25) return Colors.green;
+    if (_fatiguePct <= 50) return Colors.orange;
+    if (_fatiguePct <= 75) return Colors.deepOrange;
+    return Colors.red;
+  }
+
+  Future<void> _refreshFatigue() async {
+    final rider = ref.read(authProvider).rider;
+    if (rider == null || _loadingFatigue) return;
+
+    setState(() {
+      _loadingFatigue = true;
+    });
+    try {
+      final api = ref.read(apiServiceProvider);
+      final state = await api.getRiderState(rider.id);
+      final raw = (state['fatigue_level'] as num?)?.toDouble() ?? 0;
+      final nextPct = raw.clamp(0, 100).round();
+      if (!mounted) return;
+      setState(() {
+        _fatiguePct = nextPct;
+      });
+    } catch (_) {
+      // Keep last known value during transient backend/network issues.
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingFatigue = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final appState = ref.watch(appStateProvider);
 
     return Scaffold(
@@ -38,6 +104,39 @@ class RideScreen extends ConsumerWidget {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 24),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('AI Fatigue Monitor'),
+                                Text(
+                                  '$_fatiguePct%',
+                                  style: TextStyle(
+                                    color: _fatigueColor,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            FatigueGauge(level: _fatigueLevel),
+                            const SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                value: _fatiguePct / 100,
+                                minHeight: 8,
+                                color: _fatigueColor,
+                                backgroundColor: Colors.white12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       if (appState.currentSpeed != null && appState.currentSpeed! > 60)
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -83,9 +182,9 @@ class RideScreen extends ConsumerWidget {
                   _statCard(
                     context,
                     'Fatigue Level',
-                    'LOW',
-                    Icons.battery_full,
-                    Colors.green,
+                    '$_fatiguePct%',
+                    Icons.psychology,
+                    _fatigueColor,
                   ),
                   _statCard(
                     context,

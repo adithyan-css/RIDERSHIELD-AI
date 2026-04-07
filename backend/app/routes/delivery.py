@@ -1,15 +1,15 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.core.redis_client import get_redis
+from app.core.security import require_authenticated_rider
 from app.db.mongo import get_mongo_db
 from app.services.digipin_service import (
     decode_digipin,
     digipin_cell_bounds,
     encode_digipin,
-    resolve_digipin,
+    resolve_digipin_with_fallback,
 )
 
 router = APIRouter()
@@ -69,25 +69,21 @@ async def digipin_decode(digipin: str):
 
 @router.get("/digipin/resolve")
 async def digipin_resolve(code: str):
-    cache_key = f"digipin:{code}"
-    redis = get_redis()
-    cached = await redis.get(cache_key)
-    if cached:
-        import json
-        return json.loads(cached)
-
     try:
-        result = resolve_digipin(code)
+        result = await resolve_digipin_with_fallback(code)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    import json
-    await redis.set(cache_key, json.dumps(result), ex=3600)
     return result
 
 
 @router.post("/delivery/start")
-async def start_delivery(body: DeliveryStartIn):
+async def start_delivery(
+    body: DeliveryStartIn,
+    current_rider_id: str = Depends(require_authenticated_rider),
+):
+    if current_rider_id != body.rider_id:
+        raise HTTPException(status_code=403, detail="Token subject mismatch")
+
     db = get_mongo_db()
     existing = await db.deliveries.find_one({"order_id": body.order_id})
     if existing is not None:
@@ -97,7 +93,7 @@ async def start_delivery(body: DeliveryStartIn):
     drop_lng = body.drop_lng
     if body.digipin:
         try:
-            resolved = resolve_digipin(body.digipin)
+            resolved = await resolve_digipin_with_fallback(body.digipin)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         drop_lat = float(resolved["lat"])
@@ -127,8 +123,17 @@ async def start_delivery(body: DeliveryStartIn):
 
 
 @router.post("/delivery/complete")
-async def complete_delivery(body: DeliveryCompleteIn):
+async def complete_delivery(
+    body: DeliveryCompleteIn,
+    current_rider_id: str = Depends(require_authenticated_rider),
+):
     db = get_mongo_db()
+    doc = await db.deliveries.find_one({"order_id": body.order_id}, {"rider_id": 1})
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if doc.get("rider_id") != current_rider_id:
+        raise HTTPException(status_code=403, detail="Token subject mismatch")
+
     status = "delivered" if body.success else "failed"
     result = await db.deliveries.update_one(
         {"order_id": body.order_id},
@@ -146,10 +151,20 @@ async def complete_delivery(body: DeliveryCompleteIn):
 
 
 @router.patch("/delivery/{delivery_id}/verify")
-async def verify_delivery(delivery_id: str, body: DeliveryVerifyIn):
+async def verify_delivery(
+    delivery_id: str,
+    body: DeliveryVerifyIn,
+    current_rider_id: str = Depends(require_authenticated_rider),
+):
     from bson import ObjectId
 
     db = get_mongo_db()
+    doc = await db.deliveries.find_one({"_id": ObjectId(delivery_id)}, {"rider_id": 1})
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Delivery not found")
+    if doc.get("rider_id") != current_rider_id:
+        raise HTTPException(status_code=403, detail="Token subject mismatch")
+
     status = "delivered" if body.gps_match else "failed"
     result = await db.deliveries.update_one(
         {"_id": ObjectId(delivery_id)},

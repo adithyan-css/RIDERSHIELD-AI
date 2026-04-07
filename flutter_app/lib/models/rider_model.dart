@@ -16,11 +16,17 @@ class Rider {
   });
 
   factory Rider.fromJson(Map<String, dynamic> json) {
+    final id = (json['id'] ?? json['_id'] ?? json['rider_id'] ?? '').toString();
+    final token = (json['token'] ?? '').toString();
+    if (id.isEmpty || token.isEmpty) {
+      throw ArgumentError('Invalid rider auth payload');
+    }
+
     return Rider(
-      id: json['id'] ?? json['_id'],
-      token: json['token'],
-      name: json['name'] ?? 'Rider',
-      phone: json['phone'],
+      id: id,
+      token: token,
+      name: (json['name'] ?? 'Rider').toString(),
+      phone: (json['phone'] ?? '').toString(),
       email: json['email'],
       rating: json['rating']?.toDouble(),
     );

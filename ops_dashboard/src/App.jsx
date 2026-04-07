@@ -5,6 +5,8 @@ import RiderGrid from './components/RiderGrid.jsx'
 import HazardAudit from './components/HazardAudit.jsx'
 import DeliveryFeed from './components/DeliveryFeed.jsx'
 import StatsBar from './components/StatsBar.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
+import LoadingSkeleton from './components/LoadingSkeleton.jsx'
 
 const TABS = ['Fleet Map', 'Rider State', 'Hazard Audit', 'Deliveries']
 
@@ -24,7 +26,7 @@ const s = {
 
 export default function App() {
   const [tab, setTab] = useState(0)
-  const { connectWs, fetchInitial, wsConnected } = useOpsStore()
+  const { connectWs, fetchInitial, wsConnected, isLoading, fetchError, authError } = useOpsStore()
 
   useEffect(() => {
     fetchInitial()
@@ -55,7 +57,23 @@ export default function App() {
       </nav>
 
       <div style={s.body}>
-        {panels[tab]}
+        {authError && (
+          <div style={{ margin: 12, padding: 10, borderRadius: 8, background: '#ff4d4d20', color: '#ff8e8e', fontSize: 13 }}>
+            {authError}
+          </div>
+        )}
+        {fetchError && (
+          <div style={{ margin: 12, padding: 10, borderRadius: 8, background: '#ffb34720', color: '#ffcf8b', fontSize: 13 }}>
+            {fetchError}
+          </div>
+        )}
+        {isLoading ? (
+          <LoadingSkeleton rows={8} />
+        ) : (
+          <ErrorBoundary fallbackText="A dashboard panel crashed. Refresh to recover.">
+            {panels[tab]}
+          </ErrorBoundary>
+        )}
       </div>
     </div>
   )

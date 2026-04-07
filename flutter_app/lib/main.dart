@@ -5,7 +5,31 @@ import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_navigation_screen.dart';
 
+const String _apiBaseUrl = String.fromEnvironment('API_BASE_URL');
+const String _wsBaseUrl = String.fromEnvironment('WS_BASE_URL');
+const String _mqttBroker = String.fromEnvironment('MQTT_BROKER', defaultValue: '');
+const String _appEnv = String.fromEnvironment('APP_ENV', defaultValue: 'demo');
+
+void _validateAndLogStartupConfig() {
+  final missing = <String>[];
+  if (_apiBaseUrl.isEmpty) {
+    missing.add('API_BASE_URL');
+  }
+  if (_wsBaseUrl.isEmpty) {
+    missing.add('WS_BASE_URL');
+  }
+
+  if (missing.isNotEmpty) {
+    throw StateError('Missing required dart-define values: ${missing.join(', ')}');
+  }
+
+  debugPrint(
+    'RiderShield startup env=$_appEnv api=$_apiBaseUrl ws=$_wsBaseUrl mqtt=${_mqttBroker.isEmpty ? 'not_set' : _mqttBroker}',
+  );
+}
+
 void main() {
+  _validateAndLogStartupConfig();
   runApp(
     const ProviderScope(
       child: RiderShieldApp(),

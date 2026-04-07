@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../services/api_service.dart';
 import '../providers/auth_provider.dart';
 
 class DeliveryScreen extends ConsumerStatefulWidget {
@@ -19,7 +18,8 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
   String? _activeDeliveryId;
 
   Future<void> _resolveDigipin() async {
-    if (_digiPinController.text.isEmpty) return;
+    final code = _digiPinController.text.trim();
+    if (code.isEmpty) return;
 
     setState(() {
       _isLoading = true;
@@ -28,7 +28,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
 
     try {
       final api = ref.read(apiServiceProvider);
-      final result = await api.resolveDigipin(_digiPinController.text);
+      final result = await api.resolveDigipin(code);
       setState(() {
         _resolvedLocation = result;
         _isLoading = false;
@@ -43,12 +43,25 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
 
   Future<void> _startDelivery() async {
     if (_resolvedLocation == null) return;
+    final rider = ref.read(authProvider).rider;
+    final code = _digiPinController.text.trim();
+    if (rider == null || code.isEmpty) {
+      setState(() {
+        _error = 'Missing rider session or DIGIPIN code';
+      });
+      return;
+    }
 
     setState(() => _isLoading = true);
 
     try {
       final api = ref.read(apiServiceProvider);
-      final delivery = await api.startDelivery(_resolvedLocation!['delivery_id']);
+      final orderId = 'ORD-${DateTime.now().millisecondsSinceEpoch}';
+      final delivery = await api.startDelivery(
+        orderId: orderId,
+        riderId: rider.id,
+        digipin: code,
+      );
       setState(() {
         _activeDeliveryId = delivery.id;
         _isLoading = false;
@@ -68,7 +81,10 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
 
     try {
       final api = ref.read(apiServiceProvider);
-      await api.verifyDelivery(_activeDeliveryId!, _digiPinController.text);
+      await api.verifyDelivery(
+        _activeDeliveryId!,
+        gpsMatch: true,
+      );
       setState(() {
         _activeDeliveryId = null;
         _resolvedLocation = null;
@@ -113,7 +129,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                         border: OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.number,
-                      maxLength: 6,
+                      maxLength: 12,
                     ),
                     const SizedBox(height: 16),
                     if (_activeDeliveryId == null)
@@ -191,7 +207,7 @@ class _DeliveryScreenState extends ConsumerState<DeliveryScreen> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.green.withOpacity(0.2),
+                            color: Colors.green.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Row(

@@ -73,4 +73,10 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         partialFilterExpression={"verified": False},
     )
 
+    await db.hazard_vectors.create_index([("location", GEOSPHERE)])
+    await db.hazard_vectors.create_index(
+        "created_at",
+        expireAfterSeconds=settings.HAZARD_VECTOR_TTL_S,
+    )
+
     logger.info("MongoDB indexes ensured at %s", datetime.utcnow().isoformat())

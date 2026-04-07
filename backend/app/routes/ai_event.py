@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.core.config import settings
+from app.core.security import require_ai_api_key
+from app.middleware.rate_limit import limiter
 from app.models.ai_event import AIEventIn, AIEventProcessResult
 from app.services.ai_event_service import get_recent_ai_events, process_ai_event
 
@@ -8,9 +9,8 @@ router = APIRouter()
 
 
 @router.post("/ai/event", response_model=AIEventProcessResult)
-async def ingest_ai_event(body: AIEventIn, x_api_key: str | None = Header(default=None)):
-    if not isinstance(x_api_key, str) or x_api_key.strip() != settings.AI_EVENT_API_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+@limiter.limit("50/second")
+async def ingest_ai_event(request: Request, body: AIEventIn, _: None = Depends(require_ai_api_key)):
 
     try:
         return await process_ai_event(body.model_dump(mode="python"), source="api")

@@ -2,13 +2,24 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/alert_model.dart';
 import '../models/delivery_model.dart';
 import '../models/hazard_model.dart';
 import '../models/rider_model.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://127.0.0.1:8000/api';
+  static const String _apiBaseUrl = String.fromEnvironment('API_BASE_URL');
   static const Duration timeout = Duration(seconds: 10);
+
+  static String get baseUrl {
+    if (_apiBaseUrl.isEmpty) {
+      throw StateError('Missing API_BASE_URL dart-define');
+    }
+    if (_apiBaseUrl.endsWith('/api')) {
+      return _apiBaseUrl;
+    }
+    return '$_apiBaseUrl/api';
+  }
 
   String? _authToken;
 
@@ -74,7 +85,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> resolveDigipin(String digiPin) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/digipin/resolve?pin=$digiPin'),
+      Uri.parse('$baseUrl/digipin/resolve?code=$digiPin'),
       headers: _headers,
     ).timeout(timeout);
 
@@ -85,36 +96,64 @@ class ApiService {
     }
   }
 
-  Future<Delivery> startDelivery(String deliveryId) async {
+  Future<Delivery> startDelivery({
+    required String orderId,
+    required String riderId,
+    required String digipin,
+  }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/delivery/start'),
       headers: _headers,
       body: jsonEncode({
-        'delivery_id': deliveryId,
+        'order_id': orderId,
+        'rider_id': riderId,
+        'digipin': digipin,
       }),
     ).timeout(timeout);
 
     if (response.statusCode == 200) {
-      return Delivery.fromJson(jsonDecode(response.body));
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final normalized = {
+        ...data,
+        'id': data['order_id'],
+        'status': data['status'] ?? 'enroute',
+        'digi_pin': digipin,
+      };
+      return Delivery.fromJson(normalized);
     } else {
       throw Exception('Failed to start delivery');
     }
   }
 
-  Future<Delivery> verifyDelivery(String deliveryId, String digiPin) async {
+  Future<void> verifyDelivery(
+    String deliveryId, {
+    required bool gpsMatch,
+    String? clipId,
+  }) async {
     final response = await http.patch(
       Uri.parse('$baseUrl/delivery/$deliveryId/verify'),
       headers: _headers,
       body: jsonEncode({
-        'digi_pin': digiPin,
+        'gps_match': gpsMatch,
+        if (clipId != null) 'clip_id': clipId,
       }),
     ).timeout(timeout);
 
-    if (response.statusCode == 200) {
-      return Delivery.fromJson(jsonDecode(response.body));
-    } else {
+    if (response.statusCode != 200) {
       throw Exception('Verification failed');
     }
+  }
+
+  Future<Map<String, dynamic>> getRiderState(String riderId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/rider/$riderId/state'),
+      headers: _headers,
+    ).timeout(timeout);
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to load rider state');
   }
 
   Future<Map<String, dynamic>> getRiderProfile(String riderId) async {
@@ -128,5 +167,65 @@ class ApiService {
     } else {
       throw Exception('Failed to load profile');
     }
+  }
+
+  Future<List<Alert>> getRecentAiEvents({
+    String? riderId,
+    int limit = 25,
+  }) async {
+    final queryParams = <String, String>{
+      'limit': '$limit',
+      if (riderId != null && riderId.isNotEmpty) 'rider_id': riderId,
+    };
+
+    final uri = Uri.parse('$baseUrl/ai/events/recent').replace(queryParameters: queryParams);
+    final response = await http.get(uri, headers: _headers).timeout(timeout);
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to fetch recent AI events');
+    }
+
+    final payload = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = (payload['items'] as List<dynamic>? ?? const []);
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(_mapRecentEventToAlert)
+        .toList(growable: false);
+  }
+
+  Alert _mapRecentEventToAlert(Map<String, dynamic> event) {
+    final location = _asMap(event['location']);
+    final metadata = _asMap(event['metadata']);
+    final eventType = (event['event_type'] ?? metadata['hazard_type'] ?? 'hazard').toString();
+
+    final alertJson = {
+      'id': (metadata['event_id'] ?? event['id'] ?? DateTime.now().millisecondsSinceEpoch.toString()).toString(),
+      'type': eventType,
+      'hazard_type': (metadata['hazard_type'] ?? eventType).toString(),
+      'lat': _toDouble(location['lat']) ?? _toDouble(event['lat']) ?? 0.0,
+      'lng': _toDouble(location['lng']) ?? _toDouble(event['lng']) ?? 0.0,
+      'message': (metadata['message'] ?? event['message'] ?? 'AI event detected').toString(),
+    };
+    return Alert.fromJson(alertJson);
+  }
+
+  static Map<String, dynamic> _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((k, v) => MapEntry(k.toString(), v));
+    }
+    return const <String, dynamic>{};
+  }
+
+  static double? _toDouble(dynamic value) {
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      return double.tryParse(value);
+    }
+    return null;
   }
 }

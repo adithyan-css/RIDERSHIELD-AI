@@ -6,9 +6,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.logging import RequestContextLogMiddleware, configure_structured_logging
 from app.core.mqtt_client import start_mqtt_client, stop_mqtt_client
 from app.core.redis_client import close_redis, connect_redis
 from app.db.mongo import close_mongo, connect_mongo
+from app.middleware.rate_limit import register_rate_limiter
 from app.routes import ai_event, delivery, hazard, hfv, ops, rider, websocket_ops
 from app.workers.gp_worker import gp_worker_loop
 
@@ -16,11 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def _setup_logging() -> None:
-    level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
+    configure_structured_logging(settings.LOG_LEVEL)
 
 
 def _register_routes(app: FastAPI) -> None:
@@ -38,6 +36,14 @@ def _register_routes(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _setup_logging()
+    logger.info(
+        "Startup config env=%s api_base=%s ws_base=%s mqtt=%s:%s",
+        settings.APP_ENV,
+        settings.PUBLIC_API_BASE_URL,
+        settings.ws_base_url,
+        settings.MQTT_BROKER_HOST,
+        settings.MQTT_PORT,
+    )
     await connect_mongo()
     await connect_redis()
 
@@ -68,6 +74,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=lifespan)
+
+register_rate_limiter(app)
+app.add_middleware(RequestContextLogMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

@@ -36,6 +36,8 @@ class WebSocketState {
 }
 
 class WSClient extends StateNotifier<WebSocketState> {
+  static const String _wsBaseUrl = String.fromEnvironment('WS_BASE_URL');
+
   final Ref ref;
   WebSocketChannel? _channel;
   Timer? _reconnectTimer;
@@ -48,8 +50,12 @@ class WSClient extends StateNotifier<WebSocketState> {
 
   void connect() {
     try {
+      if (_wsBaseUrl.isEmpty) {
+        throw StateError('Missing WS_BASE_URL dart-define');
+      }
+      final base = _wsBaseUrl.endsWith('/') ? _wsBaseUrl.substring(0, _wsBaseUrl.length - 1) : _wsBaseUrl;
       _channel = WebSocketChannel.connect(
-        Uri.parse('ws://127.0.0.1:8000/ws/rider/${getRiderId()}'),
+        Uri.parse('$base/ws/rider/${getRiderId()}'),
       );
 
       _channel!.stream.listen(

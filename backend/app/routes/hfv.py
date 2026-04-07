@@ -1,7 +1,9 @@
 import asyncio
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.core.security import require_ai_api_key
+from app.middleware.rate_limit import limiter
 from app.models.hazard import HFVIn
 from app.services.hazard_service import process_hfv
 
@@ -9,7 +11,8 @@ router = APIRouter()
 
 
 @router.post("/hfv")
-async def ingest_hfv(hfv: HFVIn):
+@limiter.limit("20/second")
+async def ingest_hfv(request: Request, hfv: HFVIn, _: None = Depends(require_ai_api_key)):
     try:
         result = await process_hfv(hfv.model_dump(exclude_none=True), source="api")
     except ValueError as exc:
@@ -21,7 +24,8 @@ async def ingest_hfv(hfv: HFVIn):
 
 
 @router.post("/hfv/batch")
-async def ingest_hfv_batch(hfvs: list[HFVIn]):
+@limiter.limit("5/second")
+async def ingest_hfv_batch(request: Request, hfvs: list[HFVIn], _: None = Depends(require_ai_api_key)):
     if not hfvs:
         raise HTTPException(status_code=400, detail="Batch payload cannot be empty")
 
