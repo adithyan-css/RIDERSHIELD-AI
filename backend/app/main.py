@@ -11,7 +11,7 @@ from app.core.mqtt_client import start_mqtt_client, stop_mqtt_client
 from app.core.redis_client import close_redis, connect_redis
 from app.db.mongo import close_mongo, connect_mongo
 from app.middleware.rate_limit import register_rate_limiter
-from app.routes import ai_event, delivery, hazard, hfv, ops, rider, websocket_ops
+from app.routes import ai_event, delivery, digipin, hazard, hfv, ops, rider, websocket_ops
 from app.workers.gp_worker import gp_worker_loop
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ def _register_routes(app: FastAPI) -> None:
         app.include_router(hfv.router, prefix=prefix, tags=["HFV"])
         app.include_router(ai_event.router, prefix=prefix, tags=["AI-Events"])
         app.include_router(hazard.router, prefix=prefix, tags=["Hazards"])
+        app.include_router(digipin.router, prefix=prefix, tags=["DIGIPIN"])
         app.include_router(rider.router, prefix=prefix, tags=["Riders"])
         app.include_router(delivery.router, prefix=prefix, tags=["Delivery"])
         app.include_router(ops.router, prefix=prefix, tags=["Ops"])
@@ -37,12 +38,13 @@ def _register_routes(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     _setup_logging()
     logger.info(
-        "Startup config env=%s api_base=%s ws_base=%s mqtt=%s:%s",
+        "Startup config env=%s api_base=%s ws_base=%s mqtt=%s:%s digipin_local=%s",
         settings.APP_ENV,
         settings.PUBLIC_API_BASE_URL,
         settings.ws_base_url,
         settings.MQTT_BROKER_HOST,
         settings.MQTT_PORT,
+        settings.DIGIPIN_LOCAL_URL,
     )
     await connect_mongo()
     await connect_redis()

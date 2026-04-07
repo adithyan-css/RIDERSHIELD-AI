@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +22,7 @@ DIGIPIN_GRID = [
 ]
 
 PIN_LENGTH = 10
+_DIGIPIN_ALLOWED = re.compile(r"^[A-Z0-9-]+$")
 
 MIN_LAT = 2.5
 MAX_LAT = 38.5
@@ -34,6 +36,18 @@ class DigipinBounds:
     max_lat: float
     min_lng: float
     max_lng: float
+
+
+def _normalize_digipin(code: str) -> str:
+    cleaned = code.strip().upper()
+    if not cleaned or not _DIGIPIN_ALLOWED.match(cleaned):
+        raise ValueError("Invalid DIGIPIN format")
+
+    compact = cleaned.replace("-", "")
+    if len(compact) != PIN_LENGTH:
+        raise ValueError("Invalid DIGIPIN format")
+
+    return f"{compact[:3]}-{compact[3:6]}-{compact[6:]}"
 
 
 def _validate_lat_lng(lat: float, lng: float) -> None:
@@ -78,7 +92,7 @@ def encode_digipin(lat: float, lng: float) -> str:
 
 
 def decode_digipin(digipin: str) -> dict[str, float]:
-    pin = digipin.replace("-", "")
+    pin = _normalize_digipin(digipin).replace("-", "")
     if len(pin) != PIN_LENGTH:
         raise ValueError("Invalid DIGIPIN")
 
@@ -124,7 +138,7 @@ def decode_digipin(digipin: str) -> dict[str, float]:
 
 
 def digipin_cell_bounds(digipin: str) -> DigipinBounds:
-    pin = digipin.replace("-", "")
+    pin = _normalize_digipin(digipin).replace("-", "")
     if len(pin) != PIN_LENGTH:
         raise ValueError("Invalid DIGIPIN")
 
@@ -165,22 +179,23 @@ def digipin_cell_bounds(digipin: str) -> DigipinBounds:
 
 
 def resolve_digipin(code: str) -> dict[str, float | str]:
-    decoded = decode_digipin(code)
-    bounds = digipin_cell_bounds(code)
+    normalized = _normalize_digipin(code)
+    decoded = decode_digipin(normalized)
+    bounds = digipin_cell_bounds(normalized)
     lat_size_m = (bounds.max_lat - bounds.min_lat) * 111320
     lng_size_m = (bounds.max_lng - bounds.min_lng) * 111320
     cell_size_m = round((lat_size_m + lng_size_m) / 2, 2)
 
     return {
-        "digipin": code,
+        "digipin": normalized,
         "lat": decoded["lat"],
         "lng": decoded["lng"],
-        "address": f"DIGIPIN {code}",
+        "address": f"DIGIPIN {normalized}",
         "cell_size_m": cell_size_m,
     }
 
 
-def _extract_external_source(payload: dict[str, Any]) -> dict[str, Any]:
+def _extract_source(payload: dict[str, Any]) -> dict[str, Any]:
     for key in ("data", "result", "response"):
         value = payload.get(key)
         if isinstance(value, dict):
@@ -192,43 +207,39 @@ def _to_float(value: Any, field: str) -> float:
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"DIGIPIN API response missing valid {field}") from exc
+        raise ValueError(f"DIGIPIN payload missing valid {field}") from exc
 
 
-def _normalize_external_response(code: str, payload: dict[str, Any]) -> dict[str, float | str]:
-    source = _extract_external_source(payload)
+def _extract_digipin(payload: dict[str, Any]) -> str:
+    source = _extract_source(payload)
+    raw_code = source.get("digipin") or source.get("code") or source.get("digipin_code")
+    if not isinstance(raw_code, str):
+        raise ValueError("DIGIPIN payload missing code")
+    return _normalize_digipin(raw_code)
+
+
+def _extract_lat_lng(payload: dict[str, Any]) -> dict[str, float]:
+    source = _extract_source(payload)
     location = source.get("location") if isinstance(source.get("location"), dict) else {}
 
     lat = source.get("lat", source.get("latitude", location.get("lat", location.get("latitude"))))
-    lng = source.get(
-        "lng",
-        source.get(
-            "lon",
-            source.get("longitude", location.get("lng", location.get("lon", location.get("longitude")))),
-        ),
-    )
+    lng = source.get("lng", source.get("longitude", source.get("lon", location.get("lng", location.get("longitude", location.get("lon"))))))
 
     lat_f = _to_float(lat, "lat")
     lng_f = _to_float(lng, "lng")
     _validate_lat_lng(lat_f, lng_f)
 
-    cell_size = source.get("cell_size_m", source.get("accuracy_m", 3.0))
-
     return {
-        "digipin": str(source.get("digipin") or source.get("code") or source.get("pincode") or code),
-        "lat": lat_f,
-        "lng": lng_f,
-        "address": str(source.get("address") or source.get("formatted_address") or f"DIGIPIN {code}"),
-        "cell_size_m": _to_float(cell_size, "cell_size_m"),
-        "source": "india_post_api",
+        "lat": round(lat_f, 6),
+        "lng": round(lng_f, 6),
     }
 
 
-def _cache_key(code: str) -> str:
-    return f"digipin:resolve:{code.upper()}"
+def _cache_key(name: str, key: str) -> str:
+    return f"digipin:{name}:{key}"
 
 
-async def _try_get_cached_result(code: str) -> dict[str, float | str] | None:
+async def _try_get_cached_result(name: str, key: str) -> dict[str, Any] | None:
     if settings.DIGIPIN_CACHE_TTL_S <= 0:
         return None
 
@@ -238,18 +249,18 @@ async def _try_get_cached_result(code: str) -> dict[str, float | str] | None:
         return None
 
     try:
-        raw = await redis.get(_cache_key(code))
+        raw = await redis.get(_cache_key(name, key))
         if not raw:
             return None
         payload = json.loads(raw)
         if isinstance(payload, dict):
             return payload
     except Exception as exc:
-        logger.warning("digipin_cache_read_failed code=%s reason=%s", code, str(exc))
+        logger.warning("digipin_cache_read_failed key=%s reason=%s", key, str(exc))
     return None
 
 
-async def _try_set_cached_result(code: str, result: dict[str, float | str]) -> None:
+async def _try_set_cached_result(name: str, key: str, result: dict[str, Any]) -> None:
     if settings.DIGIPIN_CACHE_TTL_S <= 0:
         return
 
@@ -259,63 +270,135 @@ async def _try_set_cached_result(code: str, result: dict[str, float | str]) -> N
         return
 
     try:
-        await redis.set(_cache_key(code), json.dumps(result), ex=settings.DIGIPIN_CACHE_TTL_S)
+        await redis.set(_cache_key(name, key), json.dumps(result), ex=settings.DIGIPIN_CACHE_TTL_S)
     except Exception as exc:
-        logger.warning("digipin_cache_write_failed code=%s reason=%s", code, str(exc))
+        logger.warning("digipin_cache_write_failed key=%s reason=%s", key, str(exc))
 
 
-def _digipin_request_payload(code: str) -> tuple[str, dict[str, str], dict[str, str]]:
-    method = settings.DIGIPIN_API_METHOD
-    code_key = settings.DIGIPIN_API_CODE_PARAM.strip() or "code"
+def _base_url_variants() -> list[str]:
+    primary = settings.DIGIPIN_LOCAL_URL.rstrip("/")
+    variants = [primary]
+    if "localhost" in primary:
+        host_alias = primary.replace("localhost", "host.docker.internal")
+        if host_alias not in variants:
+            variants.append(host_alias)
+    return variants
 
-    headers = {"Accept": "application/json"}
-    api_key = settings.DIGIPIN_API_KEY.strip()
-    auth_header = settings.DIGIPIN_API_AUTH_HEADER.strip() or "X-API-Key"
-    if api_key:
-        headers[auth_header] = api_key
 
-    payload = {code_key: code}
-    return method, payload, headers
+def _parse_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            detail = payload.get("error") or payload.get("detail") or payload.get("message")
+            if isinstance(detail, str) and detail.strip():
+                return detail.strip()
+    except Exception:
+        pass
+    return response.text.strip() or "DIGIPIN local service rejected the request"
+
+
+async def _call_local_service(path_options: list[str], query_options: list[dict[str, Any]]) -> dict[str, Any]:
+    timeout = httpx.Timeout(settings.DIGIPIN_LOCAL_TIMEOUT_S)
+    last_exception: Exception | None = None
+    last_client_error: str | None = None
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for base_url in _base_url_variants():
+            for path in path_options:
+                url = f"{base_url}{path}"
+                for query in query_options:
+                    try:
+                        response = await client.get(url, params=query)
+                    except httpx.TimeoutException as exc:
+                        raise RuntimeError("DIGIPIN local service timeout") from exc
+                    except Exception as exc:
+                        last_exception = exc
+                        continue
+
+                    if response.status_code == 404:
+                        continue
+                    if response.status_code >= 500:
+                        raise RuntimeError("DIGIPIN local service unavailable")
+                    if response.status_code >= 400:
+                        last_client_error = _parse_error_detail(response)
+                        continue
+
+                    try:
+                        payload = response.json()
+                    except ValueError as exc:
+                        raise RuntimeError("DIGIPIN local service returned invalid JSON") from exc
+
+                    if not isinstance(payload, dict):
+                        raise RuntimeError("DIGIPIN local service returned invalid payload")
+                    return payload
+
+    if last_exception is not None:
+        raise RuntimeError("DIGIPIN local service unavailable") from last_exception
+    if isinstance(last_client_error, str) and last_client_error.strip():
+        raise ValueError(last_client_error)
+    raise RuntimeError("DIGIPIN local service route not found")
+
+
+async def encode_digipin_via_local_service(lat: float, lng: float) -> str:
+    _validate_lat_lng(lat, lng)
+    cache_token = f"{lat:.6f}:{lng:.6f}"
+
+    cached = await _try_get_cached_result("encode", cache_token)
+    if cached and isinstance(cached.get("digipin"), str):
+        return _normalize_digipin(cached["digipin"])
+
+    payload = await _call_local_service(
+        path_options=["/encode", "/api/digipin/encode"],
+        query_options=[
+            {"lat": lat, "lng": lng},
+            {"latitude": lat, "longitude": lng},
+        ],
+    )
+    digipin = _extract_digipin(payload)
+    await _try_set_cached_result("encode", cache_token, {"digipin": digipin})
+    return digipin
+
+
+async def decode_digipin_via_local_service(code: str) -> dict[str, float]:
+    normalized = _normalize_digipin(code)
+    cache_token = normalized.replace("-", "")
+
+    cached = await _try_get_cached_result("decode", cache_token)
+    if cached is not None:
+        return _extract_lat_lng(cached)
+
+    payload = await _call_local_service(
+        path_options=["/decode", "/api/digipin/decode"],
+        query_options=[
+            {"code": normalized},
+            {"digipin": normalized},
+        ],
+    )
+    decoded = _extract_lat_lng(payload)
+    await _try_set_cached_result("decode", cache_token, decoded)
+    return decoded
 
 
 async def resolve_digipin_with_fallback(code: str) -> dict[str, float | str]:
-    cleaned = code.strip().upper()
-    if not cleaned:
-        raise ValueError("DIGIPIN code is required")
-
-    cached = await _try_get_cached_result(cleaned)
+    normalized = _normalize_digipin(code)
+    cached = await _try_get_cached_result("resolve", normalized.replace("-", ""))
     if cached is not None:
         return cached
 
-    external_url = settings.DIGIPIN_API_URL.strip()
-    if external_url:
-        method, payload, headers = _digipin_request_payload(cleaned)
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(settings.DIGIPIN_API_TIMEOUT_S)) as client:
-                if method == "POST":
-                    response = await client.post(external_url, json=payload, headers=headers)
-                else:
-                    response = await client.get(external_url, params=payload, headers=headers)
-                response.raise_for_status()
+    decoded = await decode_digipin_via_local_service(normalized)
+    bounds = digipin_cell_bounds(normalized)
+    lat_size_m = (bounds.max_lat - bounds.min_lat) * 111320
+    lng_size_m = (bounds.max_lng - bounds.min_lng) * 111320
+    cell_size_m = round((lat_size_m + lng_size_m) / 2, 2)
 
-            data = response.json()
-            if not isinstance(data, dict):
-                raise ValueError("Unexpected DIGIPIN API payload")
+    resolved = {
+        "digipin": normalized,
+        "lat": decoded["lat"],
+        "lng": decoded["lng"],
+        "address": f"DIGIPIN {normalized}",
+        "cell_size_m": cell_size_m,
+        "source": "local_service",
+    }
 
-            resolved = _normalize_external_response(cleaned, data)
-            await _try_set_cached_result(cleaned, resolved)
-            return resolved
-        except httpx.TimeoutException as exc:
-            logger.warning(
-                "digipin_api_timeout code=%s timeout_s=%s reason=%s",
-                cleaned,
-                settings.DIGIPIN_API_TIMEOUT_S,
-                str(exc),
-            )
-        except Exception as exc:
-            logger.warning("digipin_api_fallback code=%s reason=%s", cleaned, str(exc))
-
-    fallback = resolve_digipin(cleaned)
-    fallback["source"] = "local_fallback"
-    await _try_set_cached_result(cleaned, fallback)
-    return fallback
+    await _try_set_cached_result("resolve", normalized.replace("-", ""), resolved)
+    return resolved

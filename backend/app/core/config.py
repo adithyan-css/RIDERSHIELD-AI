@@ -32,12 +32,8 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-    DIGIPIN_API_URL: str = ""
-    DIGIPIN_API_KEY: str = ""
-    DIGIPIN_API_AUTH_HEADER: str = "X-API-Key"
-    DIGIPIN_API_METHOD: str = "GET"
-    DIGIPIN_API_CODE_PARAM: str = "code"
-    DIGIPIN_API_TIMEOUT_S: float = 4.0
+    DIGIPIN_LOCAL_URL: str = Field(min_length=1)
+    DIGIPIN_LOCAL_TIMEOUT_S: float = 4.0
     DIGIPIN_CACHE_TTL_S: int = 900
     HAZARD_VECTOR_TTL_S: int = 7 * 24 * 60 * 60
 
@@ -59,6 +55,7 @@ class Settings(BaseSettings):
         "REDIS_URL",
         "MQTT_BROKER_HOST",
         "AI_EVENT_API_KEY",
+        "DIGIPIN_LOCAL_URL",
     )
     @classmethod
     def _must_not_be_blank(cls, value: str) -> str:
@@ -77,13 +74,12 @@ class Settings(BaseSettings):
             raise ValueError("SECRET_KEY must be at least 24 characters")
         return cleaned
 
-    @field_validator("DIGIPIN_API_METHOD")
+    @field_validator("DIGIPIN_LOCAL_TIMEOUT_S")
     @classmethod
-    def _normalize_digipin_method(cls, value: str) -> str:
-        cleaned = value.strip().upper() or "GET"
-        if cleaned not in {"GET", "POST"}:
-            raise ValueError("DIGIPIN_API_METHOD must be GET or POST")
-        return cleaned
+    def _validate_digipin_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("DIGIPIN_LOCAL_TIMEOUT_S must be positive")
+        return value
 
     @property
     def cors_origins(self) -> list[str]:

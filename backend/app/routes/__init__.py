@@ -1,1 +1,1 @@
-__all__ = ["hfv", "ai_event", "hazard", "rider", "delivery", "ops", "websocket_ops"]
+__all__ = ["hfv", "ai_event", "hazard", "digipin", "rider", "delivery", "ops", "websocket_ops"]

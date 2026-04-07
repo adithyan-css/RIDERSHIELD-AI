@@ -5,12 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.core.security import require_authenticated_rider
 from app.db.mongo import get_mongo_db
-from app.services.digipin_service import (
-    decode_digipin,
-    digipin_cell_bounds,
-    encode_digipin,
-    resolve_digipin_with_fallback,
-)
+from app.services.digipin_service import resolve_digipin_with_fallback
 
 router = APIRouter()
 
@@ -34,48 +29,6 @@ class DeliveryVerifyIn(BaseModel):
     clip_id: str | None = None
 
 
-@router.get("/digipin/encode")
-async def digipin_encode(lat: float, lng: float):
-    try:
-        code = encode_digipin(lat, lng)
-        bounds = digipin_cell_bounds(code)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return {
-        "digipin": code,
-        "digipin_code": code,
-        "cell_bounds": {
-            "min_lat": bounds.min_lat,
-            "max_lat": bounds.max_lat,
-            "min_lng": bounds.min_lng,
-            "max_lng": bounds.max_lng,
-        },
-    }
-
-
-@router.get("/digipin/decode")
-async def digipin_decode(digipin: str):
-    try:
-        decoded = decode_digipin(digipin)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return {
-        "latitude": f"{decoded['lat']:.6f}",
-        "longitude": f"{decoded['lng']:.6f}",
-    }
-
-
-@router.get("/digipin/resolve")
-async def digipin_resolve(code: str):
-    try:
-        result = await resolve_digipin_with_fallback(code)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return result
-
-
 @router.post("/delivery/start")
 async def start_delivery(
     body: DeliveryStartIn,
@@ -96,6 +49,8 @@ async def start_delivery(
             resolved = await resolve_digipin_with_fallback(body.digipin)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         drop_lat = float(resolved["lat"])
         drop_lng = float(resolved["lng"])
 
