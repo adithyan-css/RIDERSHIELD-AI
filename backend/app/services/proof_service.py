@@ -9,6 +9,15 @@ from app.services.broadcast_service import broadcast_hazard
 logger = logging.getLogger(__name__)
 
 
+def _compute_sensor_diversity(docs: list[dict[str, Any]]) -> float:
+    sensor_keys = ["depth_cm", "rain_raw", "accel_rms"]
+    present = 0
+    for key in sensor_keys:
+        if any(doc.get(key) is not None for doc in docs):
+            present += 1
+    return present / len(sensor_keys)
+
+
 async def check_verification(hazard_doc: dict[str, Any]) -> dict[str, Any]:
     coordinates = hazard_doc.get("location", {}).get("coordinates", [])
     if len(coordinates) != 2:
@@ -34,23 +43,37 @@ async def check_verification(hazard_doc: dict[str, Any]) -> dict[str, Any]:
     rider_ids = {str(doc.get("rider_id")) for doc in nearby_docs if doc.get("rider_id")}
     rider_count = len(rider_ids)
 
-    if rider_count < 2:
-        logger.debug(
-            "Proof pending for hazard_type=%s riders=%s",
-            hazard_type,
-            rider_count,
-        )
-        return {"verified": False, "proof_score": 0.0, "supporting_riders": rider_count}
-
     confidence_values = [
         float(doc.get("confidence", 0.0))
         for doc in nearby_docs
         if isinstance(doc.get("confidence"), (float, int))
     ]
+
+    model_confidence = min(1.0, sum(confidence_values) / max(len(confidence_values), 1))
+    sensor_diversity = _compute_sensor_diversity(nearby_docs)
+    cross_rider_score = min(rider_count / 3, 1.0)
+
     proof_score = round(
-        min(1.0, sum(confidence_values) / max(len(confidence_values), 1)),
+        (0.4 * model_confidence)
+        + (0.4 * cross_rider_score)
+        + (0.2 * sensor_diversity),
         3,
     )
+
+    if proof_score < 0.75:
+        logger.debug(
+            "Proof pending hazard_type=%s riders=%s proof_score=%s",
+            hazard_type,
+            rider_count,
+            proof_score,
+        )
+        return {
+            "verified": False,
+            "proof_score": proof_score,
+            "supporting_riders": rider_count,
+            "sensor_diversity": round(sensor_diversity, 3),
+        }
+
     matching_ids = [doc["_id"] for doc in nearby_docs if "_id" in doc]
 
     update_result = await db.hazards.update_many(
@@ -61,6 +84,7 @@ async def check_verification(hazard_doc: dict[str, Any]) -> dict[str, Any]:
                 "proof_score": proof_score,
                 "verified_at": datetime.now(timezone.utc),
                 "supporting_riders": rider_count,
+                "sensor_diversity": round(sensor_diversity, 3),
             }
         },
     )
@@ -73,9 +97,15 @@ async def check_verification(hazard_doc: dict[str, Any]) -> dict[str, Any]:
         await broadcast_hazard(verified_doc)
 
     logger.info(
-        "Proof verified hazard_type=%s riders=%s updated=%s",
+        "Proof verified hazard_type=%s riders=%s proof_score=%s updated=%s",
         hazard_type,
         rider_count,
+        proof_score,
         update_result.modified_count,
     )
-    return {"verified": True, "proof_score": proof_score, "supporting_riders": rider_count}
+    return {
+        "verified": True,
+        "proof_score": proof_score,
+        "supporting_riders": rider_count,
+        "sensor_diversity": round(sensor_diversity, 3),
+    }

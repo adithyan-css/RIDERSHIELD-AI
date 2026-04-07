@@ -26,10 +26,16 @@ class WebSocketManager:
             self._riders[rider_id] = RiderConnection(websocket=websocket)
         logger.info("WebSocket connected for rider_id=%s", rider_id)
 
+    async def connect(self, rider_id: str, websocket: WebSocket) -> None:
+        await self.connect_rider(rider_id, websocket)
+
     async def disconnect_rider(self, rider_id: str) -> None:
         async with self._lock:
             self._riders.pop(rider_id, None)
         logger.info("WebSocket disconnected for rider_id=%s", rider_id)
+
+    async def disconnect(self, rider_id: str) -> None:
+        await self.disconnect_rider(rider_id)
 
     async def update_rider_location(self, rider_id: str, lat: float, lng: float) -> None:
         async with self._lock:

@@ -96,3 +96,30 @@ async def get_all_rider_locations() -> dict[str, dict[str, float]]:
         except Exception:
             continue
     return out
+
+
+async def push_to_queue(geohash: str, hazard_id: str) -> str:
+    return await enqueue_hfv_id(geohash, hazard_id)
+
+
+async def pop_queue(geohash: str, batch_size: int) -> list[str]:
+    return await dequeue_hfv_ids(geohash, batch_size)
+
+
+async def set_rider_location(rider_id: str, lat: float, lng: float, ts: str, ttl_seconds: int = 30) -> str:
+    return await cache_rider_location(rider_id, lat, lng, ts, ttl_seconds=ttl_seconds)
+
+
+async def get_rider_location(rider_id: str) -> dict[str, float] | None:
+    redis = get_redis()
+    raw = await redis.get(f"rider:location:{rider_id}")
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+        return {
+            "lat": float(payload["lat"]),
+            "lng": float(payload["lng"]),
+        }
+    except Exception:
+        return None

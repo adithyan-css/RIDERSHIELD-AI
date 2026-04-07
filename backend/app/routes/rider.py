@@ -15,7 +15,7 @@ router = APIRouter()
 
 
 async def _cache_rider_location(rider_id: str, lat: float, lng: float, ts: str) -> None:
-    await cache_rider_location(rider_id, lat, lng, ts, ttl_seconds=120)
+    await cache_rider_location(rider_id, lat, lng, ts, ttl_seconds=30)
 
 
 @router.post("/rider/register", response_model=RiderAuthOut)
